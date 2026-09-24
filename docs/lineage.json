@@ -450,6 +450,9 @@
     "tools/ui/play.js": {
       "status": "ours"
     },
+    "tools/ui/screen.js": {
+      "status": "ours"
+    },
     "tools/ui/text.js": {
       "status": "ours"
     },

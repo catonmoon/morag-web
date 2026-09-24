@@ -340,3 +340,24 @@ def test_static_of_the_page_is_served_without_a_token_but_not_beyond_its_folder(
         assert raw(f"{base}/ui/")[0] == 404
     finally:
         (ui / "probe.css").unlink(missing_ok=True)
+
+
+def test_frames_are_served_only_from_the_work_folder(server, tmp_path, monkeypatch):
+    """⚠️ Сервер слушает петлю, но просьба приходит из браузера, а браузер открывает что
+    угодно: кадры отдаём только из рабочей папки и только картинки."""
+    import urllib.request
+    base, tmp = server
+    frame = upload.HOME / "rec" / "slides" / "s001.jpg"
+    frame.parent.mkdir(parents=True, exist_ok=True)
+    frame.write_bytes(b"\xff\xd8\xff\xe0 jpeg")
+    with urllib.request.urlopen(f"{base}/api/frame?t=tok&path={frame}") as r:
+        assert r.status == 200 and r.headers["Content-Type"] == "image/jpeg"
+        assert r.read() == b"\xff\xd8\xff\xe0 jpeg"
+
+    secret = tmp / "secret.jpg"
+    secret.write_bytes(b"\xff\xd8")
+    code, _ = get(f"{base}/api/frame?t=tok&path={secret}")
+    assert code == 403, "чужая папка — отказ"
+    other = upload.HOME / "rec" / "artifact.json"
+    other.write_text("{}", encoding="utf-8")
+    assert get(f"{base}/api/frame?t=tok&path={other}")[0] == 404, "не картинка — не отдаём"

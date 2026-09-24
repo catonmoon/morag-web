@@ -84,6 +84,18 @@ def stack_env_file() -> Path:
     return Path(raw).expanduser()
 
 
+# ⚠️ Канал прогресса для того, кто запустил нас подпроцессом (окно загрузки). Человеческие
+# строки остаются как были — их читают в терминале; машинная идёт рядом и только по просьбе.
+# Без неё разбор экрана выглядел в окне как одна строка на десять минут молчания.
+PROGRESS = os.environ.get("MORAG_PROGRESS") == "1"
+
+
+def progress(**fields) -> None:
+    if not PROGRESS:
+        return
+    print("@progress " + json.dumps(fields, ensure_ascii=False), flush=True)
+
+
 def load_env() -> dict:
     """Адрес и ключ шлюза из файла стека; прокси оболочки снимаем — контуру он не нужен, а
     питон через него падает на сертификате.
@@ -315,6 +327,8 @@ async def run(record: Path, args) -> int:
             stats["err"] += 1
             e["desc_error"] = meta.get("error")
             print(f"  ✗ {e['frame']}: {meta.get('error')}")
+            progress(frame=e["frame"], at=e.get("t_key", e.get("t")), error=str(meta.get("error"))[:120],
+                     done=stats["ok"] + stats["err"], n=len(items))
             return
         e.pop("desc_error", None)
         desc = normalize_desc(out)
@@ -323,6 +337,9 @@ async def run(record: Path, args) -> int:
                           **{k: v for k, v in meta.items() if k != "error"}}
         stats["tokens_in"] += meta.get("tokens_in") or 0
         stats["tokens_out"] += meta.get("tokens_out") or 0
+        progress(frame=e.get("frame", ""), at=e.get("t_key", e.get("t")), kind=desc.get("kind", ""),
+                 title=(desc.get("title") or "")[:90], text=(desc.get("text") or "")[:200],
+                 done=stats["ok"] + stats["err"] + 1, n=len(items))
         if desc["kind"] == "people":
             e["people"] = True
             e["desc"] = {"kind": "people", "title": "", "text": "", "visual": "", "unreadable": False}

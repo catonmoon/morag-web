@@ -325,6 +325,12 @@ class Handler(BaseHTTPRequestHandler):
                         "llm": cached("llm", 30.0, llm_state),
                         "home": str(upload.HOME), "ext": list(upload.VIDEO_EXT)})
             return
+        if url.path == "/api/frame":
+            # ⚠️ Кадры отдаём ТОЛЬКО из рабочей папки и только картинки: сервер слушает петлю,
+            # но просьба приходит из браузера, а браузер открывает что угодно.
+            raw = (query.get("path") or [""])[0]
+            self._frame(raw)
+            return
         if url.path == "/api/events":
             # Только память: эту ручку опрашивают часто, и она не имеет права ходить в сеть.
             since = int((query.get("since") or ["0"])[0] or 0)
@@ -332,6 +338,24 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"events": items, "cursor": cursor, "stage": STATE.get("stage", "idle")})
             return
         self._json({"error": "нет такого"}, 404)
+
+    def _frame(self, raw: str) -> None:
+        try:
+            path = Path(raw).expanduser().resolve()
+            path.relative_to(upload.HOME.resolve())
+        except (ValueError, OSError):
+            self._json({"error": "не наша папка"}, 403)
+            return
+        if path.suffix.lower() not in (".jpg", ".jpeg", ".png") or not path.is_file():
+            self._json({"error": "нет кадра"}, 404)
+            return
+        body = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg" if path.suffix.lower() != ".png" else "image/png")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_POST(self) -> None:
         url = urlparse(self.path)

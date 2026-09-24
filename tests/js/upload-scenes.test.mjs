@@ -130,6 +130,7 @@ globalThis.performance = { now: () => 0 };
 
 const { budget, state, MIN_RATE, MAX_RATE } = await import(join(repo, "tools/ui/play.js"));
 const { textScene } = await import(join(repo, "tools/ui/text.js"));
+const { screenScene } = await import(join(repo, "tools/ui/screen.js"));
 
 // --- темп ------------------------------------------------------------------------------------
 
@@ -306,6 +307,26 @@ const { textScene } = await import(join(repo, "tools/ui/text.js"));
   assert.equal(root.children[1].scrollTop, 900, "окно догнало конец текста");
   assert.match(scene.state().text, /обычная очередь/);
   assert.equal(scene.state().mode, "writing");
+}
+
+// --- сцена экрана ---------------------------------------------------------------------------
+
+{
+  // ⚠️ `describe_slides.py` возвращает УСПЕХ, если описан хотя бы один кадр: половина может
+  // упасть, и без этой сцены человек не узнает об этом вовсе.
+  const root = new El("div");
+  const scene = screenScene(root);
+  scene.apply({ t: "client.step", step: "screen" });
+  scene.apply({ t: "screen.frame", path: "/w/rec/slides/s001.jpg", at: 61, kind: "slide",
+                title: "Очереди", text: "Схема потока", done: 1, n: 3 });
+  assert.equal(scene.state().done, 1);
+  assert.match(root.textContent, /Очереди/);
+  assert.match(root.textContent, /1:01/, "время кадра подписано минутами");
+  scene.apply({ t: "screen.frame", path: "/w/rec/slides/s002.jpg", at: 90,
+                error: "ConnectError: сертификат", done: 2, n: 3 });
+  assert.equal(scene.state().bad, 1, "упавший кадр посчитан");
+  assert.match(root.textContent, /не далось 1/, "…и сказан вслух, а не пропущен молча");
+  assert.match(root.textContent, /кадр 2 из 3/);
 }
 
 console.log("ok upload-scenes");

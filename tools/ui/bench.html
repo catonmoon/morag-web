@@ -55,6 +55,9 @@
       <h3>Звук и голоса <span>— цветом отмечено, кто говорит; распознанное закрашивается</span></h3>
       <div id="scene-wave"></div>
     </div>
+    <div class="scene" id="scene-screen" hidden>
+      <h3>Экран <span>— кадр и то, что на нём увидели</span></h3>
+    </div>
     <div class="scene" id="scene-text" hidden>
       <h3>Текст <span>— сперва печатается по мере распознавания, потом правки идут прямо в нём</span></h3>
     </div>
@@ -66,10 +69,12 @@
 // сцены и правила показа, то есть ровно то, что настраивается.
 import { state as showState } from "./play.js";
 import { textScene } from "./text.js";
+import { screenScene } from "./screen.js";
 import { wave } from "./wave.js";
 
 const id = (x) => document.getElementById(x);
-const scenes = { wave: wave(id("scene-wave")), text: textScene(id("scene-text")) };
+const scenes = { wave: wave(id("scene-wave")), text: textScene(id("scene-text")),
+                 screen: screenScene(id("scene-screen")) };
 let trace = [];
 let at = 0;
 let timer = null;
@@ -95,6 +100,7 @@ function feed(e) {
   if (e.t === "turn.done") show.counter = { i: e.done, n: e.n };
   scenes.wave.apply(e);
   scenes.text.apply(e);
+  scenes.screen.apply(e);
 }
 
 function step(n = 1) {
@@ -133,6 +139,7 @@ function reset() {
   show.stage = ""; show.done = []; show.counter = null; show.error = "";
   scenes.wave.reset();
   scenes.text.reset();
+  scenes.screen.reset();
   scenes.wave.fit();
   paint();
 }

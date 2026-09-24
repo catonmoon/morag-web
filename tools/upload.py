@@ -587,6 +587,32 @@ def has_video_stream(video: Path) -> bool:
     return "video" in out.stdout
 
 
+def run_step(argv: list[str], env: dict, record: Path) -> subprocess.CompletedProcess:
+    """Запустить шаг экрана и ЧИТАТЬ его вывод ПО СТРОКАМ.
+
+    ⚠️ Потоком, а не `communicate()`: иначе весь прогресс придёт одной пачкой в конце — то есть
+    его не будет вовсе. Раньше вывод просто наследовался в терминал, и окно всё время разбора
+    молчало, даже когда все кадры падали один за другим.
+    """
+    proc = subprocess.Popen(argv, env=env, cwd=str(REPO), stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, bufsize=1)
+    for line in proc.stdout or []:
+        line = line.rstrip()
+        if not line:
+            continue
+        if line.startswith("@progress "):
+            try:
+                fields = json.loads(line[len("@progress "):])
+            except ValueError:
+                continue
+            frame = str(fields.pop("frame", "") or "")
+            emit("screen.frame", path=str(record / frame) if frame else "", **fields)
+            continue
+        say(line)
+    proc.wait()
+    return subprocess.CompletedProcess(argv, proc.returncode)
+
+
 def screen(work: Path, video: Path, record: Path) -> None:
     done = work / "screen.done"
     if done.is_file():
@@ -605,9 +631,10 @@ def screen(work: Path, video: Path, record: Path) -> None:
         ("обращения к экрану", ["screen_refs.py", str(record), "--resolve", "--video", str(video)]),
         ("аннотации", ["make_annotations.py", str(record)]),
     ]
+    env["MORAG_PROGRESS"] = "1"
     for label, argv in steps:
         say(f"экран: {label}")
-        proc = subprocess.run([str(py), str(HERE / argv[0]), *argv[1:]], env=env, cwd=str(REPO))
+        proc = run_step([str(py), str(HERE / argv[0]), *argv[1:]], env, record)
         if proc.returncode:
             raise Step(f"экран: «{label}» не прошёл (код {proc.returncode}); повторный запуск продолжит отсюда")
     for name in SIDECARS:

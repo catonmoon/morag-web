@@ -11,6 +11,7 @@
 import { $, el, reduced } from "./dom.js";
 import { budget, state as showState } from "./play.js";
 import { textScene } from "./text.js";
+import { screenScene } from "./screen.js";
 import { wave } from "./wave.js";
 
 const T = new URLSearchParams(location.search).get("t") || "";
@@ -33,7 +34,7 @@ let videos = [];
 
 // --- показ работы -----------------------------------------------------------------------------
 
-const scenes = { wave: wave(id("scene-wave")), text: textScene(id("scene-text")) };
+const scenes = { wave: wave(id("scene-wave")), text: textScene(id("scene-text")), screen: screenScene(id("scene-screen")) };
 const queue = [];        // события, пришедшие, но ещё не показанные
 let cursor = 0;
 let noEvents = false;    // старый адаптер/сервер без ленты — падаем обратно на лог
@@ -44,6 +45,7 @@ const show = { stage: "", done: [], counter: null, lastAt: 0, error: "" };
 function dispatch(e) {
   scenes.wave.apply(e);
   scenes.text.apply(e);
+  scenes.screen.apply(e);
   show.lastAt = performance.now() / 1000;
   if (e.t === "stage.start") { show.stage = e.stage; show.counter = null; }
   if (e.t === "stage.end" && !show.done.includes(e.stage)) show.done.push(e.stage);

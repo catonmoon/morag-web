@@ -161,3 +161,15 @@ input.path{max-width:460px;margin:12px auto 0;text-align:center;
 .part i.ok{background:var(--good)}
 .part i.bad{background:var(--bad)}
 .part i.off{background:var(--ink-faint);opacity:.5}
+
+/* Сцена экрана: кадр слева, то, что на нём увидели, — справа. */
+.sc-row{display:grid;grid-template-columns:minmax(0,320px) 1fr;gap:16px;align-items:start}
+.sc-shot{background:var(--surface-2);border-radius:10px;overflow:hidden;min-height:132px;
+         display:flex;align-items:center;justify-content:center}
+.sc-shot img{width:100%;height:auto;display:block}
+.sc-none{font:12px/1.5 var(--mono);color:var(--ink-faint);margin:0;padding:18px}
+.sc-kind{font:11px/1.5 var(--mono);color:var(--ink-faint);margin:0 0 4px;letter-spacing:.04em}
+.sc-title{font:600 15px/1.4 var(--sans);color:var(--ink);margin:0 0 6px}
+.sc-text{font:13px/1.6 var(--sans);color:var(--ink-dim);margin:0;max-height:118px;overflow:hidden}
+.sc-text.bad{color:var(--bad);font:12px/1.5 var(--mono)}
+@media (max-width:640px){.sc-row{grid-template-columns:1fr}}
