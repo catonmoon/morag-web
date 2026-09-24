@@ -254,7 +254,7 @@ def test_auto_fields_picks_only_from_what_the_site_allows(tmp_path, monkeypatch)
 
     monkeypatch.setattr(upload, "options", fake_options)
     monkeypatch.setattr(upload, "ask_llm", fake_llm)
-    event, tags = upload.auto_fields(artifact, "https://site", {}, title="Очереди", event="", tags=[])
+    event, tags, _ = upload.auto_fields(artifact, "https://site", {}, title="Очереди", event="", tags=[])
     assert event == "Встречи", "рубрика выбрана из списка сайта"
     assert tags == ["kafka", "дежурства"], "выдуманная метка отброшена, остались существующие"
     assert len(asked) == 2, "рубрика и метки — два отдельных вопроса"
@@ -265,7 +265,26 @@ def test_auto_fields_keeps_what_the_person_wrote_and_survives_silence(tmp_path, 
     artifact.write_text(json.dumps({"x_enriched": {"doc_summary": "о чём-то"}}), encoding="utf-8")
     monkeypatch.setattr(upload, "options", lambda *a: {"events": ["Доклады"], "tags": ["kafka"]})
     monkeypatch.setattr(upload, "ask_llm", lambda *a, **k: "")     # шлюз молчит
-    event, tags = upload.auto_fields(artifact, "https://site", {}, title="T", event="", tags=[])
+    event, tags, _ = upload.auto_fields(artifact, "https://site", {}, title="T", event="", tags=[])
     assert event == "" and tags == [], "молчание шлюза не выдумывает поля и не роняет прогон"
     same = upload.auto_fields(artifact, "https://site", {}, title="T", event="Своя", tags=["своя"])
-    assert same == ("Своя", ["своя"]), "выбранное человеком не трогаем"
+    assert same == ("Своя", ["своя"], []), "выбранное человеком не трогаем"
+
+
+def test_speakers_come_from_who_actually_spoke(tmp_path, monkeypatch):
+    """⚠️ Докладчики — те, кто ГОВОРИЛ, а не все названные: ведущий открывает встречу
+    двумя фразами и в списке докладчиков ему не место. Безымянный голос не попадает вовсе:
+    «Speaker_7» в поле «докладчики» хуже, чем пусто.
+    """
+    artifact = tmp_path / "artifact.json"
+    artifact.write_text(json.dumps({"x_enriched": {"doc_summary": "о чём-то"}}), encoding="utf-8")
+    monkeypatch.setattr(upload, "options", lambda *a: {})
+    voices = {
+        "SPEAKER_00": {"voice": "Speaker_7", "name": "Мария Кузнецова", "air": 1800.0},
+        "SPEAKER_01": {"voice": "Speaker_9", "name": "Нина Ковалёва", "air": 900.0},
+        "SPEAKER_02": {"voice": "Speaker_3", "name": "Клара Зотова", "air": 120.0},
+        "SPEAKER_03": {"voice": "Speaker_5", "name": "", "air": 800.0},
+    }
+    _, _, speakers = upload.auto_fields(artifact, "https://site", {}, title="T", event="Есть",
+                                        tags=["есть"], speakers=[], voices=voices)
+    assert speakers == ["Мария Кузнецова", "Нина Ковалёва"], speakers

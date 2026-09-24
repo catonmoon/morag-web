@@ -742,6 +742,7 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
     say(f"запись {rid} — рабочий каталог {work}")
 
     stack_started = False
+    known_voices: dict = {}
     try:
         if with_stack and not (work / "artifact.json").is_file() and not stack_health():
             ensure_gateway()
@@ -752,6 +753,7 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
         artifact = transcribe(work, video, rid, title, speakers)
         emit("client.step", step="voices", say="отпечатки голосов")
         voiceprint(work, artifact)
+        known_voices = identify_voices(work, site_url, cookies, rid)
         if with_screen:
             emit("client.step", step="record", say="черновик записи")
             record = local_record(work, artifact, rid, title, date)
@@ -764,7 +766,8 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
     # ⚠️ Человек поля НЕ ЗАПОЛНЯЛ — значит, заполняем сами (владелец, 24.09). Спрашивать
     # его после двадцати минут работы некого: он ушёл. Незаполненные поля — это запись без
     # рубрики (а рубрика решает ветку и год) и без меток, то есть запись, которую не найти.
-    event, tags = auto_fields(artifact, site_url, cookies, title=title, event=event, tags=tags)
+    event, tags, speakers = auto_fields(artifact, site_url, cookies, title=title, event=event,
+                                       tags=tags, speakers=speakers, voices=known_voices)
 
     manifest = {"title": title, "date": date, "event": event or "", "tags": tags,
                 "summary": summary or "", "speakers": speakers, "video": f"video.{ext}",
@@ -784,6 +787,59 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
     # видео). Пакет принят — больше не нужен.
     (work / "audio.mp3").unlink(missing_ok=True)
     return rid
+
+
+# Доля эфира, с которой голос считается выступавшим, а не спросившим из зала (владелец: «больше
+# например 20%»). Тот же порядок, что у ролей в корпусе: ведущий открывает встречу и говорит мало.
+SPEAKER_SHARE = 0.2
+
+
+def identify_voices(work: Path, site: str, cookies: dict, episode: str = "") -> dict:
+    """Кто говорит — СПРАШИВАЕМ У САЙТА, не дожидаясь приёма записи.
+
+    ⚠️ Номера голосов на этой машине НИЧЕГО НЕ ЗНАЧАТ: реестр корпуса живёт на сервере, и
+    `Speaker_3` отсюда — не его `Speaker_3`. Поэтому спрашиваем по ОТПЕЧАТКАМ и только чтобы
+    ПОКАЗАТЬ имена человеку и подставить докладчиков; настоящие номера присвоит сервер при приёме.
+    ⚠️⚠️ Спрашиваем `dry` — иначе узнавание ПИШЕТ в реестр и занимает номера под запись,
+    которую ещё не приняли (ловилось на сервере 24.09).
+    ⚠️ Имена берём ОТДЕЛЬНЫМ запросом: узнавание отвечает номерами, а имена живут в словаре
+    (`names.json`), который реестр не читает вовсе.
+    """
+    path = work / "voices.json"
+    if not path.is_file():
+        return {}
+    try:
+        prints = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not prints:
+        return {}
+    body = {"episode": episode, "dry": True,
+            "voices": {k: {"centroid": v.get("centroid"), "air_sec": v.get("air_sec", 0)}
+                       for k, v in prints.items() if v.get("centroid")}}
+    if not body["voices"]:
+        return {}
+    try:
+        with client(site, cookies, timeout=120) as c:
+            r = c.post("/api/voices/identify", json=body)
+            if r.status_code != 200:
+                return {}
+            answer = r.json()
+            snap = c.get("/api/voices")
+            names = {v.get("id"): v.get("name") or ""
+                     for v in ((snap.json() or {}).get("voices") or [])} if snap.status_code == 200 else {}
+    except (httpx.HTTPError, ValueError):
+        return {}
+    by_label = {}
+    for label, voice in (answer.get("map") or {}).items():
+        by_label[label] = {"voice": voice, "name": names.get(voice, ""),
+                           "air": float(prints.get(label, {}).get("air_sec") or 0)}
+    if by_label:
+        known = sorted({v["name"] for v in by_label.values() if v["name"]})
+        say(f"голоса: сайт узнал {len(by_label)}"
+            + (f", по именам — {', '.join(known)}" if known else ", имён у них пока нет"))
+        emit("voices.named", by_label=by_label)
+    return by_label
 
 
 def digest_of(artifact: Path, limit: int = 1200) -> str:
@@ -808,7 +864,8 @@ def digest_of(artifact: Path, limit: int = 1200) -> str:
 
 
 def auto_fields(artifact: Path, site: str, cookies: dict, *, title: str,
-                event: str, tags: list[str]) -> tuple[str, list[str]]:
+                event: str, tags: list[str], speakers: list[str] | None = None,
+                voices: dict | None = None) -> tuple[str, list[str], list[str]]:
     """Чего человек не выбрал — выбираем сами, ПО ЗАПИСИ.
 
     Рубрика и метки — два отдельных коротких вопроса, а не один общий: ответ на каждый
@@ -818,13 +875,26 @@ def auto_fields(artifact: Path, site: str, cookies: dict, *, title: str,
     ⚠️ Шаг НЕОБЯЗАТЕЛЬНЫЙ: нет сессии, молчит шлюз, пустой ответ — поле остаётся пустым,
     и это честнее, чем уронить прогон или выбрать наугад.
     """
+    speakers = list(speakers or [])
+    # Докладчики — те, кто ГОВОРИЛ, а не все названные: ведущий открывает каждую встречу
+    # и в списке докладчиков ему не место. Безымянный голос в список не попадает вовсе:
+    # «Speaker_7» в поле «докладчики» — это хуже, чем пусто.
+    if not speakers and voices:
+        total = sum(float(v.get("air") or 0) for v in voices.values())
+        if total > 0:
+            loud = [(float(v.get("air") or 0), v.get("name") or "") for v in voices.values()
+                    if (v.get("name") or "") and float(v.get("air") or 0) / total >= SPEAKER_SHARE]
+            speakers = [name for _, name in sorted(loud, key=lambda x: -x[0])]
+            if speakers:
+                say("докладчики не заданы — по эфиру: " + ", ".join(speakers))
+                emit("field.auto", field="speakers", value=", ".join(speakers))
     if event and tags:
-        return event, tags
+        return event, tags, speakers
     opts = options(site, cookies)
     model = ((opts.get("llm") or {}).get("model") or "")
     digest = digest_of(artifact)
     if not digest:
-        return event, tags
+        return event, tags, speakers
 
     if not event and opts.get("events"):
         choices = list(opts["events"])
@@ -853,7 +923,7 @@ def auto_fields(artifact: Path, site: str, cookies: dict, *, title: str,
             tags = picked[:4]
             say("метки не заданы — выбрали: " + ", ".join(tags))
             emit("field.auto", field="tags", value=", ".join(tags))
-    return event, tags
+    return event, tags, speakers
 
 
 def cmd_run(args: argparse.Namespace) -> int:
