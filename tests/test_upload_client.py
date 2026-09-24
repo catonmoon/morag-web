@@ -228,3 +228,44 @@ def test_the_audio_outlives_transcription_so_voiceprints_can_be_taken(env, monke
     work = upload.HOME / "2026-03-12-kafka-bez-boli"
     assert (work / "voices.json").is_file()
     assert "voices.json" in [n for n, _ in fake.uploads], "отпечатки обязаны уехать в пакете"
+
+
+def test_auto_fields_picks_only_from_what_the_site_allows(tmp_path, monkeypatch):
+    """⚠️ Поля, которые человек не заполнил, подставляются САМИ — но строго из существующего.
+
+    Сочинённая рубрика отправила бы запись не в ту ветку (рубрика решает ветку и год), а
+    сочинённая метка размыла бы фильтр: словарь меток и так наполовину одноразовый.
+    """
+    artifact = tmp_path / "artifact.json"
+    artifact.write_text(json.dumps({"x_enriched": {
+        "doc_summary": "Доклад про очереди сообщений и дежурства.",
+        "glossary": [{"term": "Kafka"}, {"term": "Grafana"}]}}), encoding="utf-8")
+
+    asked: list[str] = []
+
+    def fake_options(site, cookies):
+        return {"events": ["Доклады", "Встречи"], "tags": ["kafka", "дежурства", "ml"],
+                "llm": {"model": "Instruct"}}
+
+    def fake_llm(site, cookies, prompt, **kw):
+        asked.append(prompt)
+        # первый вопрос — рубрика, второй — метки; на метки отвечаем с выдуманной в середине
+        return "Встречи" if "рубрику" in prompt else "kafka, тимлидство, дежурства"
+
+    monkeypatch.setattr(upload, "options", fake_options)
+    monkeypatch.setattr(upload, "ask_llm", fake_llm)
+    event, tags = upload.auto_fields(artifact, "https://site", {}, title="Очереди", event="", tags=[])
+    assert event == "Встречи", "рубрика выбрана из списка сайта"
+    assert tags == ["kafka", "дежурства"], "выдуманная метка отброшена, остались существующие"
+    assert len(asked) == 2, "рубрика и метки — два отдельных вопроса"
+
+
+def test_auto_fields_keeps_what_the_person_wrote_and_survives_silence(tmp_path, monkeypatch):
+    artifact = tmp_path / "artifact.json"
+    artifact.write_text(json.dumps({"x_enriched": {"doc_summary": "о чём-то"}}), encoding="utf-8")
+    monkeypatch.setattr(upload, "options", lambda *a: {"events": ["Доклады"], "tags": ["kafka"]})
+    monkeypatch.setattr(upload, "ask_llm", lambda *a, **k: "")     # шлюз молчит
+    event, tags = upload.auto_fields(artifact, "https://site", {}, title="T", event="", tags=[])
+    assert event == "" and tags == [], "молчание шлюза не выдумывает поля и не роняет прогон"
+    same = upload.auto_fields(artifact, "https://site", {}, title="T", event="Своя", tags=["своя"])
+    assert same == ("Своя", ["своя"]), "выбранное человеком не трогаем"

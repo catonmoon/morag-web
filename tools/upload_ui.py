@@ -82,7 +82,8 @@ def videos() -> list[dict]:
                 seen.add(f)
                 stat = f.stat()
                 out.append({"path": str(f), "name": f.name, "folder": folder.name,
-                            "size": stat.st_size, "mtime": stat.st_mtime})
+                            "size": stat.st_size, "mtime": stat.st_mtime,
+                            "created": created_at(stat)})
     out.sort(key=lambda v: -v["mtime"])
     return out[:LIMIT]
 
@@ -162,6 +163,17 @@ def choose() -> dict:
     return by_path(done.stdout.strip())
 
 
+def created_at(st) -> float:
+    """Когда файл СОЗДАН, а не когда его трогали последний раз.
+
+    ⚠️ Дата выступления подставляется из файла, и `mtime` для этого врёт: копирование,
+    конвертация или просто правка метаданных сдвигают его на сегодня. На macOS есть
+    настоящая дата создания (`st_birthtime`); где её нет — берём более раннее из двух.
+    """
+    birth = getattr(st, "st_birthtime", 0) or 0
+    return min(x for x in (birth or st.st_mtime, st.st_mtime) if x)
+
+
 def by_path(raw: str) -> dict:
     """Файл по ПУТИ, вписанному руками или брошенному в поле.
 
@@ -200,7 +212,7 @@ def by_path(raw: str) -> dict:
         raise upload.Step(f"не видео: нужен {', '.join(sorted(upload.VIDEO_EXT))}")
     st = path.stat()
     return {"path": str(path), "name": path.name, "size": st.st_size, "mtime": st.st_mtime,
-            "folder": path.parent.name}
+            "created": created_at(st), "folder": path.parent.name}
 
 
 def start(fields: dict) -> dict:
@@ -212,12 +224,9 @@ def start(fields: dict) -> dict:
         video = Path(fields.get("video") or "").expanduser()
         checked = upload.check_fields(video, fields.get("title") or "", fields.get("date") or "",
                                       fields.get("slides") or None)
-        # ⚠️ Рубрику спрашиваем ЗДЕСЬ, до двадцати минут расшифровки: сервер без неё запись не
-        # примет (она решает ветку и год), и узнавать об этом в самом конце — обидно.
-        # Ловилось на первой живой загрузке 24.09. Порядок проверок — от файла к полям: человек
-        # только что бросил видео, и про него он думает первым.
-        if (site_state().get("events") or []) and not (fields.get("event") or "").strip():
-            raise upload.Step("выберите рубрику — она решает, в какую ветку и год ляжет запись")
+        # ⚠️ Рубрику больше НЕ ТРЕБУЕМ (владелец, 24.09): не выбрали — выберем сами по
+        # готовой расшифровке (`upload.auto_fields`), из списка самого сайта. Заставлять человека
+        # выбирать до прогона было нечестно: о чём запись, толком знает только расшифровка.
         STATE.update({"stage": "running", "id": checked["id"], "error": "", "url": "",
                       "started": time.time(), "finished": 0.0})
         upload.LOG.clear()

@@ -214,14 +214,15 @@ def test_site_session_becomes_the_gateway_credential(server, tmp_path, monkeypat
 
 
 
-def test_rubric_is_asked_before_the_work_not_after(server, tmp_path):
-    """⚠️ Живой случай 24.09: расшифровка и разбор экрана прошли, а сервер отверг манифест — в нём
-    не было рубрики. Она решает ветку и год, без неё запись класть некуда; спрашиваем ДО работы."""
+def test_work_starts_without_a_rubric_because_it_will_be_chosen(server, tmp_path):
+    """⚠️ Рубрика больше не требуется вперёд (владелец, 24.09): человек ещё не знает,
+    о чём запись, а расшифровка знает — поэтому рубрику выбирает `auto_fields` после прогона,
+    из списка сайта. Запрет на старте заставлял угадывать."""
     base, tmp = server
     fields = {"video": str(tmp / "Downloads" / "talk.mp4"), "title": "Норм", "date": "2026-03-12"}
     code, body = post(f"{base}/api/start?t=tok", fields)
-    assert code == 400 and "рубрик" in body["error"]
-    assert upload_ui.STATE["stage"] == "idle", "работа не началась"
+    assert code == 200 and body.get("id") == "2026-03-12-norm", body
+    upload_ui.STATE.update({"stage": "idle"})
 
 
 def test_reset_clears_the_finished_job_but_not_a_running_one(server):

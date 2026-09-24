@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 import io
 import logging
 import time
@@ -70,7 +72,23 @@ async def options(request: Request) -> dict:
            "model": gateway.get("ASR_LLM_MODEL", "") if gateway else "",
            "cookie": app_cfg.auth.cookie_name if app_cfg.auth.enabled else ""}
     return {"events": core.events_of(staging.family), "video_ext": list(core.VIDEO_EXT),
-            "max_gb": cfg.max_gb, "files": list(core.FILES), "llm": llm}
+            "max_gb": cfg.max_gb, "files": list(core.FILES), "llm": llm,
+            "tags": _tags(request)}
+
+
+def _tags(request: Request, limit: int = 200) -> list[str]:
+    """Метки, которые УЖЕ есть в корпусе, частые вперёд.
+
+    ⚠️ Список нужен приложению, чтобы подставлять метки САМОМУ, когда человек их не вписал:
+    выбирать надо ИЗ СУЩЕСТВУЮЩИХ, иначе словарь меток расползётся синонимами и перестанет
+    быть фильтром. Частота — чтобы впереди шли живые, а не одноразовые.
+    """
+    seen: Counter[str] = Counter()
+    for corpus in request.app.state.corpora.values():
+        corpus.index.refresh_if_stale()
+        for meta in corpus.index.all():
+            seen.update(t for t in (meta.tags or []) if t)
+    return [tag for tag, _ in seen.most_common(limit)]
 
 
 @router.post("")

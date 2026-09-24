@@ -324,6 +324,38 @@ def wave_peaks(audio: Path) -> None:
         say(f"  шкала звука не построилась ({type(error).__name__}) — окно покажет работу без неё")
 
 
+def options(site: str, cookies: dict) -> dict:
+    """Что сайт разрешает и что у него уже есть: рубрики, метки, потолки, шлюз.
+
+    Ошибка здесь не фатальна: без списков поля просто останутся пустыми.
+    """
+    try:
+        with client(site, cookies, timeout=20) as c:
+            r = c.get("/api/upload/options")
+        return r.json() if r.status_code == 200 else {}
+    except (httpx.HTTPError, ValueError):
+        return {}
+
+
+def ask_llm(site: str, cookies: dict, prompt: str, *, model: str = "", limit: int = 120) -> str:
+    """Один короткий вопрос к шлюзу ЧЕРЕЗ САЙТ — той же сессией, что и стадии расшифровки.
+
+    ⚠️ Пустой ответ — НЕ ошибка. Этот канал нужен только чтобы ПОДСТАВИТЬ поле, которое
+    человек не заполнил; уронить из-за этого двадцать минут расшифровки было бы дико.
+    """
+    body = {"model": model or "Instruct", "stream": False, "temperature": 0,
+            "messages": [{"role": "user", "content": prompt}]}
+    try:
+        with client(site, cookies, timeout=90) as c:
+            r = c.post(f"{SITE_LLM_PATH}/chat/completions", json=body)
+        if r.status_code != 200:
+            return ""
+        text = (((r.json().get("choices") or [{}])[0].get("message") or {}).get("content") or "")
+    except (httpx.HTTPError, ValueError, KeyError, IndexError):
+        return ""
+    return text.strip()[:limit]
+
+
 def stack_health() -> dict:
     try:
         with client(ASR_BASE, {}, timeout=20) as c:
@@ -729,6 +761,11 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
         if stack_started:
             stack("down", check=False)
 
+    # ⚠️ Человек поля НЕ ЗАПОЛНЯЛ — значит, заполняем сами (владелец, 24.09). Спрашивать
+    # его после двадцати минут работы некого: он ушёл. Незаполненные поля — это запись без
+    # рубрики (а рубрика решает ветку и год) и без меток, то есть запись, которую не найти.
+    event, tags = auto_fields(artifact, site_url, cookies, title=title, event=event, tags=tags)
+
     manifest = {"title": title, "date": date, "event": event or "", "tags": tags,
                 "summary": summary or "", "speakers": speakers, "video": f"video.{ext}",
                 # «название подставилось само» — чтобы сервер знал, можно ли его переписать
@@ -747,6 +784,76 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
     # видео). Пакет принят — больше не нужен.
     (work / "audio.mp3").unlink(missing_ok=True)
     return rid
+
+
+def digest_of(artifact: Path, limit: int = 1200) -> str:
+    """О чём запись — короткой выжимкой для вопроса к LLM: сводка расшифровки и термины.
+
+    ⚠️ Целиком расшифровку не шлём: час речи — это десятки тысяч токенов ради выбора
+    одной строки. Сводку движок уже сделал сам (`x_enriched.doc_summary`).
+    """
+    try:
+        data = json.loads(artifact.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    rich = data.get("x_enriched") or {}
+    parts = [str(rich.get("doc_summary") or "")]
+    gloss = rich.get("glossary") or []
+    terms = [str(g.get("term") or g) for g in gloss][:20]
+    if terms:
+        parts.append("Термины: " + ", ".join(terms))
+    if not parts[0]:
+        parts[0] = (rich.get("markdown") or "")[:800]
+    return "\n".join(p for p in parts if p)[:limit]
+
+
+def auto_fields(artifact: Path, site: str, cookies: dict, *, title: str,
+                event: str, tags: list[str]) -> tuple[str, list[str]]:
+    """Чего человек не выбрал — выбираем сами, ПО ЗАПИСИ.
+
+    Рубрика и метки — два отдельных коротких вопроса, а не один общий: ответ на каждый
+    проверяется по СВОЕМУ списку, и промах в одном не портит другой.
+    ⚠️ Выбираем только ИЗ СУЩЕСТВУЮЩЕГО (рубрики — из правил раскладки, метки — из корпуса):
+    сочинённая рубрика отправит запись не в ту ветку, а сочинённая метка размоет фильтр.
+    ⚠️ Шаг НЕОБЯЗАТЕЛЬНЫЙ: нет сессии, молчит шлюз, пустой ответ — поле остаётся пустым,
+    и это честнее, чем уронить прогон или выбрать наугад.
+    """
+    if event and tags:
+        return event, tags
+    opts = options(site, cookies)
+    model = ((opts.get("llm") or {}).get("model") or "")
+    digest = digest_of(artifact)
+    if not digest:
+        return event, tags
+
+    if not event and opts.get("events"):
+        choices = list(opts["events"])
+        answer = ask_llm(site, cookies, (
+            "Ниже — о чём запись выступления. Выбери ОДНУ рубрику из списка и ответь ТОЛЬКО ею, "
+            "без пояснений.\n\nСписок: " + "; ".join(choices)
+            + f"\n\nНазвание: {title}\n{digest}"), model=model)
+        pick = next((c for c in choices if c.casefold() == answer.casefold()), "")
+        if not pick:
+            pick = next((c for c in choices if c.casefold() in answer.casefold()), "")
+        if pick:
+            event = pick
+            say(f"рубрика не задана — выбрали «{pick}»")
+            emit("field.auto", field="event", value=pick)
+
+    if not tags and opts.get("tags"):
+        known = list(opts["tags"])[:200]
+        answer = ask_llm(site, cookies, (
+            "Ниже — о чём запись. Выбери до четырёх меток СТРОГО из списка, через запятую, "
+            "без пояснений. Не подходит ни одна — ответь прочерк.\n\nСписок: " + ", ".join(known)
+            + f"\n\nНазвание: {title}\n{digest}"), model=model, limit=200)
+        low = {t.casefold(): t for t in known}
+        picked = [low[part] for part in
+                  (p.strip(" .\u00ab\u00bb\"'").casefold() for p in answer.split(",")) if part in low]
+        if picked:
+            tags = picked[:4]
+            say("метки не заданы — выбрали: " + ", ".join(tags))
+            emit("field.auto", field="tags", value=", ".join(tags))
+    return event, tags
 
 
 def cmd_run(args: argparse.Namespace) -> int:

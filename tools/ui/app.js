@@ -112,8 +112,10 @@ function pick(v) {
     id("title").value = v.name.replace(/\.[^.]+$/, "").replace(/[_]+/g, " ").trim();
   }
   if (!id("date").value) {
-    const d = v.mtime ? new Date(v.mtime * 1000) : new Date();
-    id("date").value = d.toISOString().slice(0, 10);
+    // ⚠️ Дата СОЗДАНИЯ файла, а не последнего изменения: копирование или конвертация
+    // сдвигают `mtime` на сегодня, и дата выступления оказывалась датой загрузки.
+    const t = v.created || v.mtime;
+    id("date").value = (t ? new Date(t * 1000) : new Date()).toISOString().slice(0, 10);
   }
 }
 
