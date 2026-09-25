@@ -163,8 +163,7 @@ export async function renderReader(id, sec = 0, {
       : null,
     // Аннотация — целиком, без обрезки: сюда пришли читать, а не выбирать из списка. Где её нет —
     // краткое содержание по расшифровке (`blurb`), то же, что на карточке.
-    meta.summary || meta.blurb ? el("p", { class: "rd-summary", text: meta.summary || meta.blurb }) : null,
-    fieldsForm
+    meta.summary || meta.blurb ? el("p", { class: "rd-summary", text: meta.summary || meta.blurb }) : null
   );
 
   // --- плеер (липкий: до паузы не надо мотать страницу вверх) -------------
@@ -294,6 +293,10 @@ export async function renderReader(id, sec = 0, {
         el("div", { class: "rd-fields-line" }, fieldsSave, fieldsMsg))
     : null;
   fieldsSave?.addEventListener("click", () => saveFieldsNow());
+  // ⚠️ Форма добавляется в шапку ЗДЕСЬ, а не в её литерале выше: шапка собирается РАНЬШЕ,
+  // и ссылка на ещё не объявленную `const` роняла ВСЮ читалку — страница говорила «не удалось
+  // загрузить данные» (живьём на сервере 25.09).
+  if (fieldsForm) head.append(fieldsForm);
 
   /** Что человек реально тронул: ключи с изменившимся значением. */
   function fieldsPatch() {
