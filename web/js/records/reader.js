@@ -20,7 +20,8 @@ import { isPauseKey, isSeekKey, nextTarget, prevTarget } from "./seek.js";
 import { createAskPanel } from "./ask-panel.js";
 import * as player from "../ui/player.js";
 import { getRecords, getWords, transcriptUrl, slidesUrl, mediaUrl,
-         saveEdits, promoteFix, getTokens, getVoicesQueue, getVoice, renameVoice } from "../api.js";
+         saveEdits, saveFields, promoteFix, getTokens, getVoicesQueue, getVoice,
+         renameVoice } from "../api.js";
 
 const PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
 const EXPAND =
@@ -162,7 +163,8 @@ export async function renderReader(id, sec = 0, {
       : null,
     // Аннотация — целиком, без обрезки: сюда пришли читать, а не выбирать из списка. Где её нет —
     // краткое содержание по расшифровке (`blurb`), то же, что на карточке.
-    meta.summary || meta.blurb ? el("p", { class: "rd-summary", text: meta.summary || meta.blurb }) : null
+    meta.summary || meta.blurb ? el("p", { class: "rd-summary", text: meta.summary || meta.blurb }) : null,
+    fieldsForm
   );
 
   // --- плеер (липкий: до паузы не надо мотать страницу вверх) -------------
@@ -254,6 +256,78 @@ export async function renderReader(id, sec = 0, {
   // только доезжает до шапки — закрепляется под ней целиком. Промежуточного состояния «наполовину
   // под шапкой» нет вовсе: замерено на прежнем поведении — при прокрутке 400 от кадра оставалось
   // 97 пикселей из 344, а дальше он исчезал совсем, хотя запись играла.
+  // --- поля записи -------------------------------------------------------
+  //
+  // ⚠️ Правим НЕ `record.md`, а то, из чего он собирается: шапка выводится из меты и словарей
+  // при каждой пересборке, и правка, положенная в готовый файл, жила бы до первой же правки
+  // реплики. Сервер кладёт значения в «руку владельца» (`head`/`labels`/`roles`/`talk`).
+  // ⚠️ Рубрика и дата двигают запись по диску (ветка и год — каталоги). Сервер перевозит её сам
+  // и говорит об этом в ответе; адрес страницы при этом не меняется — он по id.
+  const fieldRows = [
+    ["title", "Название", "text"],
+    ["date", "Дата выступления", "date"],
+    ["event", "Рубрика", "text"],
+    ["category", "Категория", "text"],
+    ["topics", "Темы", "list"],
+    ["tags", "Метки", "list"],
+    ["speakers", "Выступали", "list"],
+    ["participants", "Участвовали", "list"],
+    ["summary", "О чём запись", "area"],
+  ];
+  const fieldInputs = new Map();
+  const fieldsMsg = el("p", { class: "rd-fields-msg" });
+  const fieldsSave = editing
+    ? el("button", { class: "dl-btn rd-fields-save", text: "Сохранить поля" }) : null;
+  const fieldsForm = editing
+    ? el("div", { class: "rd-fields", hidden: "" },
+        ...fieldRows.map(([key, label, kind]) => {
+          const value = key === "tags" || key === "topics" || key === "speakers" || key === "participants"
+            ? (meta[key] || []).join(", ")
+            : (meta[key] || (key === "summary" ? meta.blurb : "") || "");
+          const input = kind === "area"
+            ? el("textarea", { rows: "3" })
+            : el("input", { type: kind === "date" ? "date" : "text" });
+          input.value = value;
+          fieldInputs.set(key, { input, was: value, list: kind === "list" });
+          return el("label", { class: "rd-field" }, el("span", { text: label }), input);
+        }),
+        el("div", { class: "rd-fields-line" }, fieldsSave, fieldsMsg))
+    : null;
+  fieldsSave?.addEventListener("click", () => saveFieldsNow());
+
+  /** Что человек реально тронул: ключи с изменившимся значением. */
+  function fieldsPatch() {
+    const patch = {};
+    for (const [key, { input, was, list }] of fieldInputs) {
+      const now = input.value.trim();
+      if (now === was.trim()) continue;
+      patch[key] = list ? now.split(",").map((s) => s.trim()).filter(Boolean) : now;
+    }
+    return patch;
+  }
+
+  async function saveFieldsNow() {
+    const patch = fieldsPatch();
+    if (!Object.keys(patch).length) {
+      fieldsMsg.textContent = "Ничего не менялось.";
+      return;
+    }
+    fieldsMsg.textContent = "Сохраняю…";
+    try {
+      const out = await saveFields(meta.id, patch);
+      for (const [key, rec] of fieldInputs) {
+        if (key in patch) rec.was = rec.input.value;
+      }
+      fieldsMsg.textContent = out.moved
+        ? "Сохранено. Запись переехала по правилам раскладки — в поиске обновится ночной индексацией."
+        : "Сохранено. Пересобираю запись…";
+      await waitForRebuild();
+      if (!out.moved) fieldsMsg.textContent = "Готово.";
+    } catch (error) {
+      fieldsMsg.textContent = `Не сохранилось: ${error.message}`;
+    }
+  }
+
   const screen = el("div", { class: "vscreen" });
   // Субтитры и полный экран — НА КАДРЕ, в правом нижнем углу (владелец, 14.09), видны при
   // наведении. Слой абсолютный: `place()` меряет высоту кадра, и оверлей её менять не должен.
@@ -749,6 +823,7 @@ export async function renderReader(id, sec = 0, {
     if (!editBtn) return;
     editMode = true;
     showEditControls(true);
+    fieldsForm?.removeAttribute("hidden");
     karaoke?.setEditing(true);
     say("Режим правки: у каждой реплики есть «Редактировать». «ОК» сохранит правки, «Отменить» вернёт всё как было.");
   }
@@ -762,6 +837,7 @@ export async function renderReader(id, sec = 0, {
     closeSpeakerCard();
     editMode = false;
     showEditControls(false);
+    fieldsForm?.setAttribute("hidden", "");
     if (!save) {
       // Откат: абзацам возвращается исходный текст той же перестройкой, что и правка, —
       // «было» в черновике всегда исходное, даже если абзац правили дважды.

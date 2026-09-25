@@ -105,6 +105,9 @@
     "app/content/edits.py": {
       "status": "ours"
     },
+    "app/content/fields.py": {
+      "status": "ours"
+    },
     "app/content/frontmatter.py": {
       "status": "verbatim",
       "sha256": "9343b620e82fa48e8e06b954dff6f245fb5673e70a1f0f062f4e95e89d59ce77"
@@ -332,6 +335,9 @@
       "sha256": "fd2489d1752a9f3108b4f03cc7b3dcb4940a4c9c3be4cf7110686c69a10bfdcd"
     },
     "tests/test_favicon.py": {
+      "status": "ours"
+    },
+    "tests/test_fields_api.py": {
       "status": "ours"
     },
     "tests/test_intro_frame.py": {

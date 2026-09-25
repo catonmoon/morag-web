@@ -1231,6 +1231,16 @@ body[data-view="chat"] .chat-tools{display:flex}
 .rec-summary.open .rec-more{position:static;display:inline;padding:0;margin-left:6px;background:none}
 /* Аннотация в читалке — целиком: сюда пришли читать, а не выбирать. */
 .rd-summary{color:var(--ink-dim);font-size:14px;line-height:1.55;margin:6px 0 0;max-width:70ch}
+
+/* Поля записи — в режиме правки, под шапкой. Правят то, из чего шапка собирается,
+   поэтому форма живёт рядом с тем, что показывает, а не в отдельном углу. */
+.rd-fields{display:grid;gap:10px;margin:14px 0 4px;padding:14px;border:1px solid var(--line);
+           border-radius:12px;background:var(--surface-2);max-width:70ch}
+.rd-field{display:grid;gap:4px;font:12px/1.5 var(--mono);color:var(--ink-dim)}
+.rd-field input,.rd-field textarea{width:100%;padding:7px 9px;border:1px solid var(--line);
+  border-radius:8px;background:var(--surface);color:var(--ink);font:14px/1.5 var(--sans)}
+.rd-fields-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.rd-fields-msg{margin:0;font:12px/1.5 var(--mono);color:var(--ink-dim)}
 .rd-post{font-family:var(--mono);font-size:12px}
 
 

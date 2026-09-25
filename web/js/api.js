@@ -196,6 +196,14 @@ const send = (path, method, payload) => request(path, { method, body: payload })
 export const saveEdits = (id, edits) =>
   send(`/api/records/${encodeURIComponent(id)}/edits`, "POST", { edits });
 
+/** Поля шапки: название, дата, рубрика, категория, темы, метки, люди, аннотация.
+ *
+ * ⚠️ Шлём ТОЛЬКО то, что трогали: отсутствие ключа значит «не менять», пустая строка —
+ * «стереть». Форма, отправленная целиком, иначе затирала бы то, чего человек не касался.
+ */
+export const saveFields = (id, patch) =>
+  send(`/api/records/${encodeURIComponent(id)}/fields`, "POST", patch);
+
 /** Снять все правки записи — обратимость это операция, а не обещание. */
 export const dropEdits = (id) =>
   send(`/api/records/${encodeURIComponent(id)}/edits`, "DELETE");

@@ -776,12 +776,18 @@ def build_one(args, source: Path, changed_out: list | None = None) -> int:
     # шапку собираем сами: у артефакта она вырожденная (см. докстринг)
     roles = roles_of(body, words, meta_json, spaces.roles_policy(branch_for(record_dir) or "", corpus))
     labels = labels_of(meta_json)
+    # ⚠️⚠️ РУКА ВЛАДЕЛЬЦА ДЛЯ ШАПКИ (`head` в мете). До неё правка названия, рубрики, меток или
+    # аннотации не переживала первую же пересборку: эти поля копировались из СТАРОЙ шапки, а
+    # мета для них не читалась вовсе — то есть правка «с сайта» жила до ближайшей правки реплики.
+    # Тот же приём, что у `labels` (категория и темы) и `roles` (люди): рука побеждает
+    # вычисленное, инструмент её не трогает.
+    hand = (meta_json or {}).get("head") or {}
     meta = {
-        "title": args.title or old_head.get("title") or artifact.stem,
+        "title": args.title or hand.get("title") or old_head.get("title") or artifact.stem,
         # Дата ВЫСТУПЛЕНИЯ из календаря выступлений, если строка нашлась (решение владельца
         # 12.09): дата поста отстаёт на дни, а бывает и на месяцы. id и адрес не меняются.
         "date": args.date or talk.get("date") or old_head.get("date"),
-        "event": args.event or old_head.get("event"),
+        "event": args.event or hand.get("event") or old_head.get("event"),
         # Ветка = первый уровень раскладки на диске. Пишем её ПОЛЕМ, хотя она уже есть в пути,
         # и это не дубль по недосмотру: путь входит только в dense-вектор, а АГЕНТ его не видит
         # — в нашей выдаче печатается момент записи («доклад · MM:SS · спикер»), строки «Путь:»
@@ -802,14 +808,15 @@ def build_one(args, source: Path, changed_out: list | None = None) -> int:
         "media": args.media or old_head.get("media"),
         # Аннотация доклада — авторский текст поста, а не пересказ расшифровки: в списке из
         # 167 заголовков она единственное, по чему видно, о чём запись.
-        "summary": args.summary or old_head.get("summary"),
+        "summary": args.summary or hand.get("summary") or old_head.get("summary"),
         # Ссылка на исходный пост: расшифровка не заменяет обсуждение под ним.
-        "post": args.post or old_head.get("post"),
+        "post": args.post or hand.get("post") or old_head.get("post"),
         # Обсуждение в мессенджере — из меты (полный текст поста и календарь), не из старой шапки:
         # мета пересобирается, а шапка выводится из неё.
         "discussion": ((meta_json.get("links") or {}).get("discussion")) or old_head.get("discussion"),
         "slides": old_head.get("slides"),
-        "tags": [t.strip() for t in args.tags.split(",")] if args.tags else old_head.get("tags"),
+        "tags": ([t.strip() for t in args.tags.split(",")] if args.tags
+                 else hand.get("tags") or old_head.get("tags")),
         "award": bool(talk.get("award")),
     }
     if not meta["date"]:

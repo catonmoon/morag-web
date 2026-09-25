@@ -16,6 +16,9 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from .. import config
+from ..content import fields as record_fields
+from ..content import upload as core
 from ..content.edits import Refused, Stale
 from .voices import _guard, _record_dirs
 
@@ -35,6 +38,23 @@ class Batch(BaseModel):
     # Правки копятся в памяти читалки и уезжают ОДНОЙ пачкой по выходу из режима: иначе запись
     # пересобиралась бы после каждого слова.
     edits: list[TurnEdit] = Field(default_factory=list, max_length=200)
+
+
+class Fields(BaseModel):
+    """Поля шапки, которые правят с сайта. Все необязательные: пришло — меняем, нет — не трогаем.
+
+    ⚠️ `None` и `""` значат РАЗНОЕ: пустая строка — «стереть поле», отсутствие ключа — «не
+    трогать». Иначе форма, отправленная целиком, затирала бы то, чего человек не касался.
+    """
+    title: str | None = Field(default=None, max_length=300)
+    date: str | None = Field(default=None, max_length=10)
+    event: str | None = Field(default=None, max_length=200)
+    summary: str | None = Field(default=None, max_length=4000)
+    tags: list[str] | None = Field(default=None, max_length=40)
+    category: str | None = Field(default=None, max_length=120)
+    topics: list[str] | None = Field(default=None, max_length=40)
+    speakers: list[str] | None = Field(default=None, max_length=40)
+    participants: list[str] | None = Field(default=None, max_length=60)
 
 
 class Promote(BaseModel):
@@ -86,6 +106,36 @@ async def save(request: Request, record_id: str, payload: Batch) -> dict:
     queued = request.app.state.rebuilder.enqueue({record_id: record_dir}) if result["saved"] else []
     log.info("правок реплик в %s: %d", record_id, len(result["saved"]))
     return {**result, "queued": queued, "queue": request.app.state.rebuilder.status()}
+
+
+@router.post("/records/{record_id}/fields")
+async def fields(request: Request, record_id: str, payload: Fields) -> dict:
+    """Правка полей шапки: название, дата, рубрика, категория, темы, метки, люди, аннотация.
+
+    Право то же, что у правки реплики (`edit`, любой вошедший — решение владельца 25.09): подпись
+    правки несёт логин, видно, кто что менял.
+    ⚠️ Если новые рубрика/метки/дата зовут запись в другую ветку или год, каталог ПЕРЕЕЗЖАЕТ, и в
+    пересборку ставится уже новый путь. Иначе шапка разойдётся с раскладкой на диске, а путь
+    входит в doc_id движка. Адрес страницы при этом не меняется — он по id записи.
+    """
+    _guard(request)
+    record_dir = _dir(request, record_id)
+    family = config.family_dir(request.app.state.cfg)
+    try:
+        result = record_fields.save(record_dir, payload.model_dump(exclude_unset=True),
+                                    why=request.app.state.auth.why_line(request), family=family,
+                                    events=core.events_of(family))
+        moved = record_fields.move(record_dir, result["move"]) if result["move"] else None
+    except record_fields.Refused as error:
+        raise HTTPException(400, str(error))
+    where = moved or record_dir
+    for corpus in request.app.state.corpora.values():
+        corpus.index.refresh_if_stale()
+    queued = request.app.state.rebuilder.enqueue({record_id: where})
+    log.info("поля записи %s: %s%s", record_id, ", ".join(result["changed"]),
+             f", переехала в {where}" if moved else "")
+    return {"changed": result["changed"], "moved": str(where) if moved else "",
+            "queued": queued, "queue": request.app.state.rebuilder.status()}
 
 
 @router.delete("/records/{record_id}/edits")
