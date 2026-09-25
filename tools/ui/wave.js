@@ -29,20 +29,14 @@ export function wave(root) {
   let revealFrom = 0;         // когда началось проявление ленты
   let live = [];              // закрашенные окна: [[from, to, idx], …]
   let cursor = null;          // бегущая метка: секунда
+  let window_ = null;         // кусок, который распознаётся прямо сейчас: [от, до]
+  // ⚠️⚠️ Имена, узнанные САЙТОМ по отпечаткам. Без них легенда светит `SPEAKER_00` — ровно то,
+  // что владелец видел три прогона подряд: узнавание работало, а показать его было некому.
+  let named = {};             // метка диаризатора → {voice, name}
   let dirty = true;
   let raf = null;
 
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-
-  /** Вертикальный перелив от тона к его тени: плоская заливка смотрится бедно. */
-  function shaded(ctx, idx, y0, y1) {
-    const base = colour(idx);
-    const g = ctx.createLinearGradient(0, y0, 0, y1);
-    g.addColorStop(0, mix(base, "#FFFFFF", 0.32));
-    g.addColorStop(0.42, base);
-    g.addColorStop(1, mix(base, "#000000", 0.62));
-    return g;
-  }
 
   function fit() {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -60,58 +54,66 @@ export function wave(root) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const { width: W, height: H } = canvas;
-    const waveH = Math.round(H * 0.74);
-    const ribbonY = waveH + Math.round(H * 0.06);
-    const ribbonH = H - ribbonY;
     ctx.clearRect(0, 0, W, H);
-
-    // --- слой 1: пики. Нет огибающей — ровная линия, и это честно: шкала не построилась.
     const n = peaks ? peaks.length : 0;
     const bw = n ? W / n : W;
-    ctx.fillStyle = css("--ink-faint") || "#66788a";
-    ctx.globalAlpha = 0.38;
-    if (!n) {
-      ctx.fillRect(0, waveH / 2 - 1, W, 2);
-    } else {
-      for (let i = 0; i < n; i++) {
-        const v = (peaks[i] / 255) * waveH;
-        ctx.fillRect(i * bw, (waveH - v) / 2, Math.max(1, bw - 0.6), Math.max(1, v));
-      }
-    }
-    ctx.globalAlpha = 1;
+    const at = (sec) => (audioSec > 0 ? (sec / audioSec) * n : 0);
 
-    // --- слой 2: лента голосов, проявляется слева направо
-    if (spans.length && audioSec > 0) {
+    // ⚠️⚠️ Ленты голосов НЕТ (владелец, 25.09): полоса под волной говорила то же самое,
+    // что и сама волна, только мельче и раньше. Теперь всё на одной картинке:
+    //   — столбик красится в цвет голоса сразу после диаризации, но приглушённо;
+    //   — распознанное пассом-2 горит в полную силу;
+    //   — текущий кусок подсвечен полосой позади столбиков.
+    const voiceAt = new Int16Array(n).fill(-1);
+    if (spans.length && audioSec > 0 && n) {
       const done = reduced() || !revealFrom
         ? 1
         : Math.min(1, (performance.now() - revealFrom) / REVEAL_MS);
       const eased = 1 - (1 - done) ** 3;
+      const limit = Math.floor(n * eased);
       for (const [a, b, idx] of spans) {
-        const x0 = (a / audioSec) * W;
-        const x1 = Math.min((b / audioSec) * W, W * eased);
-        if (x0 > W * eased) break;
-        ctx.fillStyle = shaded(ctx, idx, ribbonY, ribbonY + ribbonH);
-        ctx.fillRect(x0, ribbonY, Math.max(1, x1 - x0), ribbonH);
+        for (let i = Math.max(0, Math.floor(at(a))); i < Math.min(limit, Math.ceil(at(b))); i++) {
+          voiceAt[i] = idx;
+        }
       }
       if (done < 1) dirty = true;
     }
+    const heard = new Uint8Array(n);
+    for (const [a, b] of live) {
+      for (let i = Math.max(0, Math.floor(at(a))); i < Math.min(n, Math.ceil(at(b))); i++) heard[i] = 1;
+    }
 
-    // --- слой 3: живой слой — окна, уже распознанные пассом-2
-    if (n && audioSec > 0) {
-      for (const [a, b, idx] of live) {
-        const i0 = Math.max(0, Math.floor((a / audioSec) * n));
-        const i1 = Math.min(n, Math.ceil((b / audioSec) * n));
-        ctx.fillStyle = shaded(ctx, idx, 0, waveH);
-        for (let i = i0; i < i1; i++) {
-          const v = (peaks[i] / 255) * waveH;
-          ctx.fillRect(i * bw, (waveH - v) / 2, Math.max(1, bw - 0.6), Math.max(1, v));
-        }
-      }
-      if (cursor != null) {
-        const x = (cursor / audioSec) * W;
-        ctx.fillStyle = css("--accent") || "#E7A857";
-        ctx.fillRect(Math.min(W - 2, x), 0, 2, waveH);
-      }
+    // Текущий кусок — подложкой, чтобы было видно даже на тихом месте.
+    if (window_ && audioSec > 0) {
+      const x0 = (window_[0] / audioSec) * W;
+      const x1 = (window_[1] / audioSec) * W;
+      ctx.fillStyle = css("--accent-wash") || "rgba(228,160,75,.14)";
+      ctx.fillRect(x0, 0, Math.max(2, x1 - x0), H);
+    }
+
+    if (!n) {
+      ctx.fillStyle = css("--ink-faint") || "#66788a";
+      ctx.globalAlpha = 0.38;
+      ctx.fillRect(0, H / 2 - 1, W, 2);
+      ctx.globalAlpha = 1;
+      return;
+    }
+
+    const back = css("--surface-2") || "#1E2C3B";
+    let style = "";
+    for (let i = 0; i < n; i++) {
+      const idx = voiceAt[i];
+      const want = idx < 0
+        ? `${css("--ink-faint") || "#66788a"}66`
+        : (heard[i] ? colour(idx) : mix(colour(idx), back, 0.55));
+      if (want !== style) { style = want; ctx.fillStyle = want; }
+      const v = (peaks[i] / 255) * H;
+      ctx.fillRect(i * bw, (H - v) / 2, Math.max(1, bw - 0.6), Math.max(1, v));
+    }
+    if (cursor != null && audioSec > 0) {
+      const x = (cursor / audioSec) * W;
+      ctx.fillStyle = css("--accent") || "#E7A857";
+      ctx.fillRect(Math.min(W - 2, x), 0, 2, H);
     }
   }
 
@@ -128,10 +130,22 @@ export function wave(root) {
     if (raf === null) raf = requestAnimationFrame(tick);
   }
 
+  /** Как звать голос: имя с сайта, иначе честно — «номер корпуса · новый» или сырая метка.
+   *
+   * ⚠️ «Не спросили» и «спросили, но голос новый» обязаны различаться: первое чинится
+   * входом на сайт, второе — именем в режиме правки после загрузки.
+   */
+  function title(label) {
+    const known = named[label];
+    if (known && known.name) return known.name;
+    if (known && known.voice) return `${known.voice} · новый`;
+    return label;
+  }
+
   function showLegend() {
-    legend.replaceChildren(...speakers.map((name, idx) =>
+    legend.replaceChildren(...speakers.map((label, idx) =>
       el("span", { class: "wv-who" },
-         el("i", { style: `background:${colour(idx, 2)}` }), name)));
+         el("i", { style: `background:${colour(idx, 2)}` }), title(label))));
   }
 
   return {
@@ -151,15 +165,21 @@ export function wave(root) {
         paint();
         return;
       }
+      if (e.t === "voices.named") {
+        named = e.by_label || {};
+        showLegend();
+        return;
+      }
       if (e.t === "chunk.start") {
         const idx = Math.max(0, speakers.indexOf(e.spk));
         live.push([e.from, e.to, idx < 0 ? 0 : idx]);
+        window_ = [e.from, e.to];
         cursor = e.to;
         paint();
       }
     },
     reset() {
-      peaks = null; audioSec = 0; speakers = []; spans = []; live = []; cursor = null;
+      peaks = null; audioSec = 0; speakers = []; spans = []; live = []; cursor = null; named = {}; window_ = null;
       revealFrom = 0;
       legend.replaceChildren();
       paint();

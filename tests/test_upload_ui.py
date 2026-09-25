@@ -361,3 +361,33 @@ def test_frames_are_served_only_from_the_work_folder(server, tmp_path, monkeypat
     other = upload.HOME / "rec" / "artifact.json"
     other.write_text("{}", encoding="utf-8")
     assert get(f"{base}/api/frame?t=tok&path={other}")[0] == 404, "не картинка — не отдаём"
+
+
+def test_the_send_checkbox_stands_before_the_scenes(server):
+    """⚠️ Галочка отправки обязана быть видна всю работу. Стояла после трёх сцен — то есть
+    ниже экрана, и человек считал, что она исчезает."""
+    import urllib.request
+    base, _ = server
+    with urllib.request.urlopen(f"{base}/?t=tok") as r:
+        html = r.read().decode("utf-8")
+    assert 'id="send"' in html
+    assert html.index('id="send"') < html.index('id="scene-wave"'), \
+        "галочка стоит до сцен"
+    assert 'class="line-check"' in html, "у строки своё правило, а не инлайновые заплатки"
+
+
+def test_fields_from_the_card_beat_the_auto_pick(server, monkeypatch):
+    """⚠️ Карточка перед отправкой — последнее слово человека. Поля из неё ложатся в
+    задание прогона; автоподбор заполняет только пустое — значит, не перебьёт."""
+    base, _ = server
+    upload_ui.STATE.update({"stage": "done", "sent": False, "send": False,
+                            "id": "2026-03-12-norm",
+                            "fields": {"title": "Норм", "date": "2026-03-12", "event": ""}})
+    started: list = []
+    monkeypatch.setattr(upload_ui, "start", lambda fields: started.append(fields) or {"id": "x"})
+    code, _ = post(f"{base}/api/send?t=tok",
+                   {"on": True, "fields": {"event": "Доклады", "tags": ["kafka"]}})
+    assert code == 200
+    assert started and started[0]["event"] == "Доклады" and started[0]["tags"] == ["kafka"]
+    assert started[0]["title"] == "Норм", "нетронутое осталось"
+    upload_ui.STATE.update({"stage": "idle", "sent": False, "send": True, "fields": {}})

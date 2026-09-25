@@ -34,7 +34,7 @@ let videos = [];
 
 // --- показ работы -----------------------------------------------------------------------------
 
-const scenes = { wave: wave(id("scene-wave")), text: textScene(id("scene-text")), screen: screenScene(id("scene-screen")) };
+const scenes = { wave: wave(id("scene-wave")), text: textScene(id("scene-text")), screen: screenScene(id("scene-screen"), { frameUrl: (p) => `/api/frame?path=${encodeURIComponent(p)}&t=${encodeURIComponent(T)}` }) };
 const queue = [];        // события, пришедшие, но ещё не показанные
 let cursor = 0;
 let noEvents = false;    // старый адаптер/сервер без ленты — падаем обратно на лог
@@ -53,6 +53,48 @@ function dispatch(e) {
   if (e.t === "chunk.start") show.counter = { i: e.i, n: e.n };
   if (e.t === "turn.done") show.counter = { i: e.done, n: e.n };
   if (e.t === "client.step") show.stage = e.step;
+  if (e.t === "manifest.ready") showCard(e);
+}
+
+// --- карточка записи перед отправкой -------------------------------------------------------
+//
+// ⚠️ Человек должен видеть, ЧТО именно уедет: поля подбираются сами (рубрика решает
+// ветку и год!), и до сих пор увидеть их можно было только строкой в свёрнутом логе.
+const CARD_ROWS = [["title", "Название", "text"], ["date", "Дата выступления", "date"],
+                   ["event", "Рубрика", "text"], ["tags", "Метки", "list"],
+                   ["speakers", "Докладчики", "list"], ["summary", "О чём запись", "area"]];
+const cardInputs = new Map();
+let cardReady = null;
+
+function showCard(m) {
+  cardReady = m;
+  cardInputs.clear();
+  id("card-fields").replaceChildren(...CARD_ROWS.map(([key, label, kind]) => {
+    const value = kind === "list" ? (m[key] || []).join(", ") : (m[key] || "");
+    const input = kind === "area" ? el("textarea", { rows: "3" })
+                                  : el("input", { type: kind === "date" ? "date" : "text" });
+    input.value = value;
+    cardInputs.set(key, { input, was: value, list: kind === "list" });
+    return el("label", {}, label, input);
+  }));
+  const parts = [];
+  if (m.duration) parts.push(`${Math.round(m.duration / 60)} мин`);
+  if (m.voices) parts.push(`голосов ${m.voices}`);
+  if (m.frames) parts.push(`кадров экрана ${m.frames}`);
+  if (m.chars) parts.push(`знаков ${m.chars}`);
+  id("card-what").textContent = parts.join(" · ");
+  id("card").hidden = false;
+}
+
+/** Только тронутое: форма целиком затирала бы автоподбор тем же самым. */
+function cardPatch() {
+  const patch = {};
+  for (const [key, { input, was, list }] of cardInputs) {
+    const now = input.value.trim();
+    if (now === was.trim()) continue;
+    patch[key] = list ? now.split(",").map((s) => s.trim()).filter(Boolean) : now;
+  }
+  return patch;
 }
 
 function drain(now) {
@@ -249,6 +291,9 @@ async function tick() {
   const job = s.job || {};
   id("work").hidden = job.stage !== "running" && job.stage !== "error";
   id("ready").hidden = job.stage !== "done";
+  // Карточка живёт, пока решение не принято: отправили — прячем.
+  if (job.sent) { id("card").hidden = true; cardReady = null; }
+  else if (cardReady) id("card").hidden = false;
   if (s.log && s.log.length !== lastLogLen) {
     lastLogLen = s.log.length;
     id("log").textContent = s.log.join("\n");
@@ -272,7 +317,7 @@ async function tick() {
     // Передумали по ходу — говорим прямо, где лежит готовое и как отправить.
     id("ready-msg").textContent = "Расшифровка готова, на сайт не отправлял — галочка была снята. "
       + `Пакет лежит в ${s.home}/${job.id}.`;
-    id("send-now").hidden = false;
+    id("send-now").hidden = Boolean(cardReady);   // кнопка живёт в карточке, если карточка есть
     id("open-record").hidden = true;
   } else if (job.stage === "done") {
     id("send-now").hidden = true;
@@ -341,6 +386,17 @@ id("do-login").onclick = async () => {
 id("send").onchange = async () => {
   try { await api("/api/send", { on: id("send").checked }); }
   catch (e) { id("work-msg").textContent = e.message; }
+};
+
+id("card-send").onclick = async () => {
+  id("card-send").disabled = true;
+  id("card-msg").textContent = "отправляю…";
+  try {
+    await api("/api/send", { on: true, fields: cardPatch() });
+    await tick();
+    id("card-msg").textContent = "";
+  } catch (error) { id("card-msg").textContent = error.message; }
+  id("card-send").disabled = false;
 };
 
 id("send-now").onclick = async () => {

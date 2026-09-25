@@ -39,6 +39,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import zipfile
 from pathlib import Path
@@ -478,7 +479,8 @@ def voiceprint(work: Path, artifact: Path) -> Path | None:
     return out
 
 
-def transcribe(work: Path, video: Path, rid: str, title: str, speakers: list[str]) -> Path:
+def transcribe(work: Path, video: Path, rid: str, title: str, speakers: list[str],
+               on_spans=None) -> Path:
     artifact = work / "artifact.json"
     if artifact.is_file():
         say("транскрибация уже есть — пропускаю")
@@ -516,8 +518,14 @@ def transcribe(work: Path, video: Path, rid: str, title: str, speakers: list[str
             for evt in s.get("events") or ():
                 # ⚠️ Нумерацию и время ставим СВОИ: у адаптера они относительны его задачи, а
                 # окну нужна одна шкала на весь прогон — вместе с шагами клиента.
-                emit(str(evt.pop("t", "?")),
-                     **{k: v for k, v in evt.items() if k not in ("seq", "at")})
+                kind = str(evt.pop("t", "?"))
+                fields = {k: v for k, v in evt.items() if k not in ("seq", "at")}
+                emit(kind, **fields)
+                # ⚠️⚠️ Голоса узнаём СРАЗУ ПОСЛЕ ДИАРИЗАЦИИ, а не после всей расшифровки:
+                # границы речи уже есть (они в самом событии), звук лежит рядом, CAM++ свободен.
+                # Ждать артефакт значит светить человеку `SPEAKER_00` всю работу.
+                if kind == "diar.spans" and on_spans is not None:
+                    on_spans(fields)
             if s.get("dropped"):
                 # Дыру показываем, а не прячем: иначе картинка будет плавной, но с провалом.
                 emit("gap", n=int(s["dropped"]))
@@ -795,7 +803,7 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
     say(f"запись {rid} — рабочий каталог {work}")
 
     stack_started = False
-    known_voices: dict = {}
+    known_voices: dict = {}    # метка → {voice, name, air}; наполняется фоном сразу после диаризации
     try:
         if with_stack and not (work / "artifact.json").is_file() and not stack_health():
             ensure_gateway()
@@ -803,10 +811,16 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
             stack_started = True
         TRACE[:] = [work / "events.jsonl"]   # трасса прогона: по ней настраивается окно (стенд)
         emit("client.step", step="audio", say="звук из видео")
-        artifact = transcribe(work, video, rid, title, speakers)
+        def spans_ready(fields: dict) -> None:
+            threading.Thread(target=early_voices, daemon=True, name="voices",
+                             args=(work, fields, site_url, cookies, rid, known_voices)).start()
+
+        artifact = transcribe(work, video, rid, title, speakers, on_spans=spans_ready)
         emit("client.step", step="voices", say="отпечатки голосов")
         voiceprint(work, artifact)
-        known_voices = identify_voices(work, site_url, cookies, rid)
+        # Узнали раньше (по спанам диаризации) — второй раз не спрашиваем.
+        if not known_voices:
+            known_voices.update(identify_voices(work, site_url, cookies, rid))
         if with_screen:
             emit("client.step", step="record", say="черновик записи")
             record = local_record(work, artifact, rid, title, date)
@@ -826,6 +840,11 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
                 "summary": summary or "", "speakers": speakers, "video": f"video.{ext}",
                 # «название подставилось само» — чтобы сервер знал, можно ли его переписать
                 "title_auto": bool(title_auto)}
+    # ⚠️ Что именно уедет на сайт — ОДНИМ событием, перед самой отправкой. До этого подставленных
+    # полей в окне не было вовсе: `field.auto` никто не разбирал, а состояние хранило только
+    # введённое при старте — человек видел результат только строкой в свёрнутом логе.
+    emit("manifest.ready", **{k: v for k, v in manifest.items() if k != "video"},
+         id=rid, work=str(work), **record_size(work, known_voices))
     files: list[tuple[str, Path]] = [("artifact.json", artifact)]
     if (work / "voices.json").is_file():
         files.append(("voices.json", work / "voices.json"))
@@ -852,6 +871,48 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
 # Доля эфира, с которой голос считается выступавшим, а не спросившим из зала (владелец: «больше
 # например 20%»). Тот же порядок, что у ролей в корпусе: ведущий открывает встречу и говорит мало.
 SPEAKER_SHARE = 0.2
+
+
+def early_voices(work: Path, spans_event: dict, site: str, cookies: dict, episode: str,
+                 done: dict) -> None:
+    """Отпечатки и узнавание СРАЗУ ПОСЛЕ ДИАРИЗАЦИИ, фоном.
+
+    Событие несёт отрезки `[начало, конец, номер голоса]` и список меток — ровно то, что
+    нужно CAM++. Звук лежит рядом с начала работы.
+    ⚠️ Фоном — чтобы не задержать опрос адаптера: пока считаются отпечатки, идёт пасс-1.
+    ⚠️ Шаг необязателен целиком: нет ключа к CAM++, нет сессии, молчит сайт — просто не будет
+    имён, а после расшифровки отпечатки посчитаются по-старому.
+    """
+    audio = work / "audio.mp3"
+    key = stack_env_value("ASR_CAMPP_KEY")
+    if not audio.is_file() or not key:
+        return
+    labels = list(spans_event.get("speakers") or [])
+    by_label: dict[str, dict] = {}
+    for item in spans_event.get("spans") or []:
+        try:
+            a, b, idx = float(item[0]), float(item[1]), int(item[2])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if b <= a or idx >= len(labels):
+            continue
+        rec = by_label.setdefault(labels[idx], {"spans": [], "air_sec": 0.0})
+        rec["spans"].append((a, b))
+        rec["air_sec"] += b - a
+    if not by_label:
+        return
+    try:
+        import voiceprints   # noqa: PLC0415 — нужен только здесь
+        prints = voiceprints.from_spans(by_label, audio,
+                                        url=stack_env_value("ASR_CAMPP_URL") or voiceprints.DEFAULT_URL,
+                                        key=key, work=work)
+    except Exception as error:      # noqa: BLE001 — узнавание не имеет права ронять прогон
+        say(f"  ранние отпечатки не посчитались ({type(error).__name__}) — спросим позже")
+        return
+    if not prints:
+        return
+    (work / "voices.json").write_text(json.dumps(prints, ensure_ascii=False), encoding="utf-8")
+    done.update(identify_voices(work, site, cookies, episode))
 
 
 def identify_voices(work: Path, site: str, cookies: dict, episode: str = "") -> dict:
@@ -885,9 +946,16 @@ def identify_voices(work: Path, site: str, cookies: dict, episode: str = "") -> 
             if r.status_code != 200:
                 return {}
             answer = r.json()
-            snap = c.get("/api/voices")
-            names = {v.get("id"): v.get("name") or ""
-                     for v in ((snap.json() or {}).get("voices") or [])} if snap.status_code == 200 else {}
+            # ⚠️⚠️ Имена спрашиваем ПОИМЁННО, а не одним запросом за снимком: `/api/voices` отдаёт
+            # СНИМОК (`tools/voices.py --scan`), а он на сервере месячной давности — голоса, названные
+            # позже, в нём просто отсутствуют, и имён не было вовсе (три прогона подряд в окне
+            # светились `SPEAKER_X`). Карточка одного голоса берёт имя ПРЯМО из словаря и от
+            # снимка не зависит; голосов в записи единицы — цена вопроса ничтожна.
+            names = {}
+            for voice in dict.fromkeys((answer.get("map") or {}).values()):
+                one = c.get(f"/api/voices/{voice}")
+                if one.status_code == 200:
+                    names[voice] = (one.json() or {}).get("name") or ""
     except (httpx.HTTPError, ValueError):
         return {}
     by_label = {}
@@ -900,6 +968,36 @@ def identify_voices(work: Path, site: str, cookies: dict, episode: str = "") -> 
             + (f", по именам — {', '.join(known)}" if known else ", имён у них пока нет"))
         emit("voices.named", by_label=by_label)
     return by_label
+
+
+def record_size(work: Path, voices: dict) -> dict:
+    """Что внутри записи числами — для карточки перед отправкой. Нет данных — нет ключа:
+    ноль выглядит как ошибка, а пустота — как пустота."""
+    out: dict = {}
+    if voices:
+        out["voices"] = len(voices)
+    transcript = work / "transcript.md"
+    if transcript.is_file():
+        out["chars"] = len(transcript.read_text(encoding="utf-8"))
+    artifact = work / "artifact.json"
+    if artifact.is_file():
+        try:
+            data = json.loads(artifact.read_text(encoding="utf-8"))
+            sec = float(((data.get("x_enriched") or {}).get("coverage") or {}).get("audio_sec") or 0)
+            if sec:
+                out["duration"] = round(sec)
+        except (OSError, ValueError, TypeError):
+            pass
+    slides = work / "record.slides.json"
+    if slides.is_file():
+        try:
+            data = json.loads(slides.read_text(encoding="utf-8"))
+            frames = [e for e in (data.get("slides") or []) if e.get("frame")]
+            if frames:
+                out["frames"] = len(frames)
+        except (OSError, ValueError):
+            pass
+    return out
 
 
 def digest_of(artifact: Path, limit: int = 1200) -> str:

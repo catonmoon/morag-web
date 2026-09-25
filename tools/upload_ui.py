@@ -413,6 +413,16 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/api/send":
                 # Передумали по ходу — меняем флаг; работа спросит его ПЕРЕД отправкой.
                 STATE["send"] = bool(body.get("on", True))
+                # ⚠️ Поля из карточки перед отправкой побеждают автоподбор: `auto_fields` заполняет
+                # только пустое, а расшифровка и экран на повторном прогоне не считаются заново.
+                given = body.get("fields") or {}
+                if isinstance(given, dict) and given:
+                    fields = dict(STATE.get("fields") or {})
+                    for key in ("title", "date", "event", "tags", "speakers", "summary"):
+                        if key in given:
+                            fields[key] = given[key]
+                    fields["title_auto"] = False if "title" in given else fields.get("title_auto")
+                    STATE["fields"] = fields
                 # Работа уже кончилась без отправки, а теперь просят отправить — запускаем тот же
                 # прогон: он возобновляемый и дойдёт сразу до загрузки.
                 if STATE["send"] and STATE.get("stage") == "done" and not STATE.get("sent"):

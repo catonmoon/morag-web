@@ -72,6 +72,15 @@
     <div class="bar" id="bar"><i></i></div>
     <p class="mood" id="work-mood"></p>
 
+    <!-- ⚠️ Галочка стоит ДО сцен и видна всю работу (владелец, 25.09): стояла после трёх
+         сцен — то есть ниже экрана, и выглядела исчезнувшей. Человек видит расшифровку по
+         ходу и может передумать выкладывать; пакет останется в рабочей папке. -->
+    <label class="line-check">
+      <input type="checkbox" id="send" checked>
+      <span>Загрузить на сайт после расшифровки</span>
+    </label>
+
+
     <div class="scene">
       <h3>Звук и голоса <span>— цветом отмечено, кто говорит; распознанное закрашивается</span></h3>
       <div id="scene-wave"></div>
@@ -85,15 +94,20 @@
       <h3>Текст <span>— сперва печатается по мере распознавания, потом правки идут прямо в нём</span></h3>
     </div>
 
-    <!-- ⚠️ Галочка живая ВСЮ работу (владелец, 25.09): человек видит расшифровку по ходу
-         и может передумать выкладывать. Пакет останется в рабочей папке. -->
-    <label class="line" style="gap:9px;margin:2px 0 10px">
-      <input type="checkbox" id="send" checked style="width:auto;margin:0">
-      Загрузить на сайт после расшифровки
-    </label>
-
     <p class="msg" id="work-msg"></p>
     <details><summary>Что происходит</summary><pre id="log"></pre></details>
+  </section>
+
+  <!-- карточка записи: что именно уедет на сайт (владелец, 25.09) -->
+  <section id="card" hidden>
+    <h2>Запись готова</h2>
+    <p class="msg" id="card-what"></p>
+    <div id="card-fields"></div>
+    <div class="line" style="margin-top:12px">
+      <button id="card-send">Загрузить на сайт</button>
+      <span id="card-msg" class="msg"></span>
+    </div>
+    <p class="msg">Категорию и темы подберёт сервер после приёма — окно их не решает.</p>
   </section>
 
   <!-- готово -->

@@ -10,7 +10,7 @@
 
 import { el } from "./dom.js";
 
-export function screenScene(root) {
+export function screenScene(root, { frameUrl = null } = {}) {
   const head = el("p", { class: "tx-head" });
   const shot = el("div", { class: "sc-shot" });
   const side = el("div", { class: "sc-side" });
@@ -26,8 +26,11 @@ export function screenScene(root) {
     if (failed) bad += 1;
     done = e.done || done + 1;
     total = e.n || total;
-    if (e.path && !failed) {
-      shot.replaceChildren(el("img", { src: `/api/frame?path=${encodeURIComponent(e.path)}`, alt: "" }));
+    // ⚠️⚠️ Адрес кадра строит ВЫЗЫВАЮЩИЙ: у локального сервера всё закрыто токеном из
+    // адреса (иначе любая вкладка браузера читала бы файлы), а сцена токена не знает. Без
+    // этого `<img>` получал 403 и рисовал битую иконку — молча (ловилось живьём 25.09).
+    if (e.path && !failed && frameUrl) {
+      shot.replaceChildren(el("img", { src: frameUrl(e.path), alt: "" }));
     } else if (failed) {
       shot.replaceChildren(el("p", { class: "sc-none", text: "кадр не разобрался" }));
     }

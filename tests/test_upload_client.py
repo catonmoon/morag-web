@@ -346,3 +346,69 @@ def test_the_date_comes_from_the_video_not_from_the_file(monkeypatch, tmp_path):
     monkeypatch.setattr(upload.subprocess, "run", boom)
     assert upload.shot_at(tmp_path / "talk.mp4") == "", "и не падаем без ffprobe"
     _ = sp
+
+
+def test_names_come_from_the_dictionary_not_from_the_stale_snapshot(tmp_path, monkeypatch):
+    """⚠️⚠️ Имена берём ПОИМЁННО (`/api/voices/{voice}`), а не из снимка `/api/voices`.
+
+    Снимок собирают руками (`tools/voices.py --scan`), и на сервере он месячной давности: голоса,
+    названные позже, в нём просто отсутствуют — и окно три прогона подряд светило `SPEAKER_X`,
+    хотя узнавание работало. Карточка одного голоса читает имя прямо из словаря.
+    """
+    asked: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        asked.append(request.url.path)
+        if request.url.path == "/api/voices/identify":
+            body = json.loads(request.read())
+            assert body["dry"] is True, "узнавание не имеет права занимать номера"
+            return httpx.Response(200, json={"map": {"SPEAKER_00": "Speaker_7"}, "report": []})
+        if request.url.path == "/api/voices":       # снимок старый: нашего голоса в нём нет
+            return httpx.Response(200, json={"ready": True, "voices": []})
+        if request.url.path == "/api/voices/Speaker_7":
+            return httpx.Response(200, json={"id": "Speaker_7", "name": "Мария Кузнецова"})
+        return httpx.Response(404, json={})
+
+    monkeypatch.setattr(upload, "TRANSPORT", httpx.MockTransport(handle))
+    work = tmp_path / "rec"
+    work.mkdir()
+    (work / "voices.json").write_text(json.dumps(
+        {"SPEAKER_00": {"centroid": [0.0] * 192, "air_sec": 900.0, "cluster": "SPEAKER_00"}}),
+        encoding="utf-8")
+    upload.EVENTS.clear()
+    out = upload.identify_voices(work, "https://site.example.org", {"s": "1"}, "rec")
+    assert out["SPEAKER_00"]["name"] == "Мария Кузнецова", out
+    assert out["SPEAKER_00"]["voice"] == "Speaker_7"
+    assert "/api/voices/Speaker_7" in asked, "имя спрошено поимённо"
+    named = [e for e in upload.EVENTS if e["t"] == "voices.named"]
+    assert named and named[-1]["by_label"]["SPEAKER_00"]["name"] == "Мария Кузнецова", \
+        "имя уехало в окно событием"
+    upload.EVENTS.clear()
+
+
+def test_voices_are_asked_right_after_diarization_not_after_the_whole_run(tmp_path, monkeypatch):
+    """⚠️ Спаны готовы на третьей минуте, артефакт — на одиннадцатой. Ждать артефакт ради
+    тех же границ значит всю работу светить человеку `SPEAKER_00`."""
+    seen = {}
+
+    monkeypatch.setattr(upload, "stack_env_value", lambda name: "k" if "CAMPP" in name else "")
+    import voiceprints
+    monkeypatch.setattr(voiceprints, "from_spans",
+                        lambda voices, audio, **kw: (seen.update(voices) or
+                                                     {"SPEAKER_00": {"centroid": [0.0] * 192,
+                                                                     "air_sec": 30.0}}))
+    monkeypatch.setattr(upload, "identify_voices",
+                        lambda work, site, cookies, episode: {"SPEAKER_00": {"voice": "Speaker_7",
+                                                                            "name": "Нина Ковалёва",
+                                                                            "air": 30.0}})
+    work = tmp_path / "rec"
+    work.mkdir()
+    (work / "audio.mp3").write_bytes(b"mp3")
+    out: dict = {}
+    upload.early_voices(work, {"speakers": ["SPEAKER_00", "SPEAKER_01"],
+                               "spans": [[0.0, 20.0, 0], [20.0, 30.0, 0], [30.0, 40.0, 1]]},
+                        "https://site", {}, "rec", out)
+    assert set(seen) == {"SPEAKER_00", "SPEAKER_01"}, "спаны разобраны по меткам"
+    assert seen["SPEAKER_00"]["air_sec"] == 30.0, "эфир сложен по отрезкам"
+    assert out["SPEAKER_00"]["name"] == "Нина Ковалёва", "имя узнано до конца расшифровки"
+    assert (work / "voices.json").is_file(), "отпечатки легли рядом — второй раз их не считают"

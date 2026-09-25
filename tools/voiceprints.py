@@ -91,10 +91,21 @@ def fingerprints(artifact: Path, audio: Path, *, url: str = DEFAULT_URL, key: st
     ошибка: на сервере такая метка отойдёт самому длинному голосу записи, как делает и конвейер.
     """
     data = json.loads(Path(artifact).read_text(encoding="utf-8"))
-    voices = spans_of(data)
+    return from_spans(spans_of(data), audio, url=url, key=key,
+                      work=work or Path(artifact).parent)
+
+
+def from_spans(voices: dict, audio: Path, *, url: str = DEFAULT_URL, key: str = "",
+               work: Path | None = None) -> dict:
+    """То же самое, но по ГОТОВЫМ спанам — без артефакта.
+
+    ⚠️ Спаны диаризации готовы через две-три минуты после старта, а артефакт — только в конце
+    расшифровки. Ждать артефакт ради тех же границ значит показывать человеку `SPEAKER_00`
+    всё время прогона, хотя сайт уже может назвать имя.
+    """
     if not voices:
         return {}
-    wav = wav16k(Path(audio), (work or Path(artifact).parent) / "voices.wav")
+    wav = wav16k(Path(audio), (work or Path(audio).parent) / "voices.wav")
     spans = [{"start": s, "end": e, "speaker": label}
              for label, rec in voices.items() for s, e in rec["spans"] if e - s >= MIN_SEG]
     if not spans:

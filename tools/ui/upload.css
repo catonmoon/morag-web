@@ -173,3 +173,11 @@ input.path{max-width:460px;margin:12px auto 0;text-align:center;
 .sc-text{font:13px/1.6 var(--sans);color:var(--ink-dim);margin:0;max-height:118px;overflow:hidden}
 .sc-text.bad{color:var(--bad);font:12px/1.5 var(--mono)}
 @media (max-width:640px){.sc-row{grid-template-columns:1fr}}
+
+/* Строка с галочкой. ⚠️ Общее правило формы (`input{width:100%;padding:10px 12px;border}`)
+   превращает квадратик в широкий блок, а `flex-wrap` уносит подпись на следующую строку.
+   Инлайновые заплатки это не чинили: `width:auto` у блочного input — это вся строка. */
+.line-check{display:flex;align-items:center;gap:9px;flex-wrap:nowrap;margin:0 0 14px;
+            font-size:13px;color:var(--ink)}
+.line-check input{display:inline-block;width:auto;flex:none;margin:0;padding:0;
+                  border:0;background:none;accent-color:var(--accent-fill)}

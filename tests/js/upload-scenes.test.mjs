@@ -131,6 +131,7 @@ globalThis.performance = { now: () => 0 };
 const { budget, state, MIN_RATE, MAX_RATE } = await import(join(repo, "tools/ui/play.js"));
 const { textScene } = await import(join(repo, "tools/ui/text.js"));
 const { screenScene } = await import(join(repo, "tools/ui/screen.js"));
+const { wave } = await import(join(repo, "tools/ui/wave.js"));
 
 // --- темп ------------------------------------------------------------------------------------
 
@@ -343,6 +344,25 @@ const { screenScene } = await import(join(repo, "tools/ui/screen.js"));
   assert.equal(scene.state().bad, 1, "упавший кадр посчитан");
   assert.match(root.textContent, /не далось 1/, "…и сказан вслух, а не пропущен молча");
   assert.match(root.textContent, /кадр 2 из 3/);
+}
+
+// --- легенда голосов -----------------------------------------------------------------------
+
+{
+  // ⚠️⚠️ Имена с сайта обязаны доходить ДО ЛЕГЕНДЫ. Узнавание работало три прогона
+  // подряд, а человек видел `SPEAKER_00`: событие разбирала только сцена текста.
+  const root = new El("div");
+  const scene = wave(root);
+  scene.apply({ t: "job.meta", audio_sec: 600 });
+  scene.apply({ t: "diar.spans", speakers: ["SPEAKER_00", "SPEAKER_01"], spans: [[0, 10, 0]] });
+  assert.match(root.textContent, /SPEAKER_00/, "без имён — сырая метка");
+  scene.apply({ t: "voices.named", by_label: {
+    SPEAKER_00: { voice: "Speaker_7", name: "Мария Кузнецова" },
+    SPEAKER_01: { voice: "Speaker_41", name: "" } } });
+  assert.match(root.textContent, /Мария Кузнецова/, "имя встало в легенду");
+  assert.ok(!root.textContent.includes("SPEAKER_00"), "сырой метки больше нет");
+  // ⚠️ «Не спросили» и «спросили, но голос новый» — разные вещи, и чинятся по-разному.
+  assert.match(root.textContent, /Speaker_41 · новый/, "безымянный назван честно");
 }
 
 console.log("ok upload-scenes");
