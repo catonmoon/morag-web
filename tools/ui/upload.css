@@ -56,10 +56,30 @@ button.icon{background:none;border:1px solid var(--line);color:var(--ink-dim);pa
 
 /* Настроение подписи — три состояния, и они РАЗНЫЕ по смыслу: «идёт» это событие за последние
    три секунды, «считает» — стадия молчит по своей природе, «молчит» — мы не понимаем. */
-.mood{font:12px/1.5 var(--mono);color:var(--ink-dim);margin:0 0 14px;min-height:1.5em}
+.work-head{display:flex;align-items:baseline;gap:12px;margin:0 0 14px}
+.mood{font:12px/1.5 var(--mono);color:var(--ink-dim);margin:0;min-height:1.5em;flex:1;
+      min-width:0;overflow-wrap:anywhere}
 .mood.считает{color:var(--sonar)}
 .mood.молчит{color:var(--bad)}
 .mood.ошибка{color:var(--bad)}
+.mood .tail{color:var(--ink-faint)}
+/* Параллельная дорожка — тише главной: она сообщает, а не требует внимания. */
+.beside{font:12px/1.5 var(--mono);color:var(--ink-faint);margin:-8px 0 12px;overflow-wrap:anywhere}
+.beside::before{content:"параллельно: "}
+/* Часы с начала работы. `tabular-nums` — чтобы цифры не подпрыгивали каждую секунду. */
+.clock{font:12px/1.5 var(--mono);color:var(--ink-faint);font-variant-numeric:tabular-nums}
+
+/* Перелив по названию стадии: единственное движение, которое идёт, пока работа идёт, — и этого
+   достаточно, чтобы строка не выглядела замершей. Тот же приём, что у знака в шапке сайта. */
+@media (prefers-reduced-motion: no-preference){
+  .mood.работает .st,.mood.считает .st{
+    background:linear-gradient(100deg,var(--ink-dim) 34%,var(--ink) 44%,var(--accent) 50%,
+               var(--ink) 56%,var(--ink-dim) 66%);
+    background-size:300% 100%;-webkit-background-clip:text;background-clip:text;
+    color:transparent;animation:mood-shimmer 3.6s linear infinite}
+  .mood.считает .st{animation-duration:5.4s}
+}
+@keyframes mood-shimmer{from{background-position:210% 0}to{background-position:-110% 0}}
 
 .scene{margin:0 0 16px}
 .scene > h3{font:600 11px/1.4 var(--mono);text-transform:uppercase;letter-spacing:.06em;
@@ -67,17 +87,59 @@ button.icon{background:none;border:1px solid var(--line);color:var(--ink-dim);pa
 .scene > h3 span{text-transform:none;letter-spacing:0;color:var(--ink-faint);font-weight:400}
 
 /* волна */
-.wv-c{display:block;width:100%;border-radius:10px;background:var(--ground)}
+.wv{position:relative}
+.wv-c{display:block;width:100%;border-radius:10px;background:var(--ground);cursor:crosshair}
 .wv-legend{display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 0;font:12px/1.4 var(--mono);
            color:var(--ink-dim)}
-.wv-who{display:inline-flex;align-items:center;gap:6px}
+.wv-who{display:inline-flex;align-items:center;gap:6px;transition:opacity .12s,color .12s}
 .wv-who i{width:9px;height:9px;border-radius:3px;display:inline-block}
+/* Наведение в обе стороны: голос под курсором — в полную силу, остальные уходят. */
+.wv-who.dim{opacity:.35}
+.wv-who.on{color:var(--ink)}
+/* Подсказка «кто говорит» — над волной, курсор ей не мешает. */
+.wv-tip{position:absolute;top:-6px;transform:translateX(-50%);pointer-events:none;
+        background:var(--surface-2);color:var(--ink);border:1px solid var(--line);
+        border-radius:7px;padding:2px 8px;font:11px/1.5 var(--mono);white-space:nowrap;
+        box-shadow:var(--shadow-sm)}
+.wv-tip[hidden]{display:none}
+
+/* отправка на сайт: файл — строка с полосой; видео едет минутами, и полоса здесь главная */
+.sn-list{display:grid;gap:8px;margin:0 0 8px}
+.sn-row{display:grid;grid-template-columns:minmax(120px,1fr) 2fr auto;gap:10px;align-items:center;
+        font:12px/1.5 var(--mono);color:var(--ink-dim)}
+.sn-row .bar{margin:0}
+.sn-row .sn-meta{color:var(--ink-faint);font-variant-numeric:tabular-nums;white-space:nowrap}
+.sn-row.on .sn-name,.sn-row.on .sn-meta{color:var(--ink)}
+.sn-row.ok .bar i{background:var(--good)}
+.sn-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:560px){ .sn-row{grid-template-columns:1fr auto;gap:4px} .sn-row .bar{grid-column:1 / -1} }
+
+/* переслушивание: пары «было → стало». Цвет несёт смысл — вернулась речь, честная тишина, не вышло */
+.rl-list{display:grid;gap:8px;margin:0 0 8px}
+.rl-row{border-left:3px solid var(--line);padding:6px 0 6px 10px}
+.rl-row.ok{border-color:var(--good)}
+.rl-row.hush{border-color:var(--ink-faint)}
+.rl-row.bad{border-color:var(--bad)}
+.rl-head{display:flex;gap:10px;align-items:baseline;font:11px/1.5 var(--mono);color:var(--ink-faint)}
+.rl-verdict{color:var(--ink-dim)}
+.rl-row.ok .rl-verdict{color:var(--good)}
+.rl-row.bad .rl-verdict{color:var(--bad)}
+.rl-was{margin:2px 0 0;font:13px/1.5 var(--serif);color:var(--ink-faint);
+        text-decoration:line-through var(--bad);text-decoration-thickness:1px;
+        overflow-wrap:anywhere;max-height:3em;overflow:hidden}
+.rl-now{margin:1px 0 0;font:15px/1.5 var(--serif);color:var(--ink);overflow-wrap:anywhere}
 
 /* текст — ГЛАВНОЕ в окне: большое поле, по нему листают назад, как по расшифровке */
 .tx-head{font:11px/1.5 var(--mono);text-transform:uppercase;letter-spacing:.06em;
          color:var(--ink-faint);margin:0 0 6px;min-height:1.5em}
+/* ⚠️⚠️ `overflow-wrap:anywhere` — не косметика, а защита от РАСШИФРОВКИ. ASR на зависшем звуке
+   выдаёт слово в сотню букв («ИИИИИИ…»), и без переноса оно задаёт МИНИМАЛЬНУЮ ширину поля:
+   замерено 25.09 на слове из 120 знаков — поле 842 → 1544 px, у всей страницы 480 px
+   горизонтальной прокрутки. `overflow-x:hidden` от этого не спасает: элемент не обрезается, он
+   вырастает сам, а вместе с ним и вся колонка. Правило нужно ВЕЗДЕ, где показывается чужой
+   текст — расшифровка, описания кадров, имена файлов. */
 .tx-body{font:17px/2.05 var(--serif);color:var(--ink);margin:0 0 12px;
-         height:clamp(260px,52vh,560px);overflow-y:auto;overflow-x:hidden;
+         height:clamp(260px,52vh,560px);overflow-y:auto;overflow-x:hidden;overflow-wrap:anywhere;
          background:var(--surface-2);border-radius:12px;padding:16px 18px}
 .tx-piece{display:inline}
 /* Черновик пасса-1 — приглушённый: видно, что этот кусок ещё будет уточнён. Чистовик
@@ -129,7 +191,8 @@ button.icon{background:none;border:1px solid var(--line);color:var(--ink-dim);pa
 .fx-count{font:12px/1.5 var(--mono);color:var(--ink-dim);margin:0}
 
 pre{margin:10px 0 0;padding:12px;background:var(--ground);border:1px solid var(--line);border-radius:9px;
-    max-height:190px;overflow:auto;font:12px/1.5 var(--mono);white-space:pre-wrap;color:var(--ink-dim)}
+    max-height:190px;overflow:auto;font:12px/1.5 var(--mono);white-space:pre-wrap;color:var(--ink-dim);
+    overflow-wrap:anywhere}
 details summary{cursor:pointer;color:var(--ink-dim);font-size:13px;margin:2px 0 10px}
 .line{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .msg{font-size:13px;color:var(--ink-dim)}
@@ -163,14 +226,17 @@ input.path{max-width:460px;margin:12px auto 0;text-align:center;
 .part i.off{background:var(--ink-faint);opacity:.5}
 
 /* Сцена экрана: кадр слева, то, что на нём увидели, — справа. */
-.sc-row{display:grid;grid-template-columns:minmax(0,320px) 1fr;gap:16px;align-items:start}
+.sc-row{display:grid;grid-template-columns:minmax(0,320px) minmax(0,1fr);gap:16px;align-items:start}
+/* Vision пересказывает экран как есть — в описании бывает и путь, и ключ, и строка кода. */
+.sc-side{min-width:0;overflow-wrap:anywhere}
 .sc-shot{background:var(--surface-2);border-radius:10px;overflow:hidden;min-height:132px;
          display:flex;align-items:center;justify-content:center}
 .sc-shot img{width:100%;height:auto;display:block}
 .sc-none{font:12px/1.5 var(--mono);color:var(--ink-faint);margin:0;padding:18px}
 .sc-kind{font:11px/1.5 var(--mono);color:var(--ink-faint);margin:0 0 4px;letter-spacing:.04em}
-.sc-title{font:600 15px/1.4 var(--sans);color:var(--ink);margin:0 0 6px}
-.sc-text{font:13px/1.6 var(--sans);color:var(--ink-dim);margin:0;max-height:118px;overflow:hidden}
+.sc-title{font:600 15px/1.4 var(--sans);color:var(--ink);margin:0 0 6px;overflow-wrap:anywhere}
+.sc-text{font:13px/1.6 var(--sans);color:var(--ink-dim);margin:0;max-height:118px;overflow:hidden;
+         overflow-wrap:anywhere}
 .sc-text.bad{color:var(--bad);font:12px/1.5 var(--mono)}
 @media (max-width:640px){.sc-row{grid-template-columns:1fr}}
 

@@ -8,10 +8,12 @@
 // этого правила стенд (`bench.html`), на котором анимация настраивается по записанной трассе,
 // построить нельзя.
 
-import { $, el, reduced } from "./dom.js";
+import { $, clock, el, reduced } from "./dom.js";
 import { budget, state as showState } from "./play.js";
 import { textScene } from "./text.js";
 import { screenScene } from "./screen.js";
+import { relistenScene } from "./relisten.js";
+import { sendScene, size as fileSize } from "./send.js";
 import { wave } from "./wave.js";
 
 const T = new URLSearchParams(location.search).get("t") || "";
@@ -34,25 +36,57 @@ let videos = [];
 
 // --- показ работы -----------------------------------------------------------------------------
 
-const scenes = { wave: wave(id("scene-wave")), text: textScene(id("scene-text")), screen: screenScene(id("scene-screen"), { frameUrl: (p) => `/api/frame?path=${encodeURIComponent(p)}&t=${encodeURIComponent(T)}` }) };
+const scenes = { wave: wave(id("scene-wave")), text: textScene(id("scene-text")), screen: screenScene(id("scene-screen"), { frameUrl: (p) => `/api/frame?path=${encodeURIComponent(p)}&t=${encodeURIComponent(T)}` }), send: sendScene(id("scene-send")), relisten: relistenScene(id("scene-relisten")) };
 const queue = [];        // события, пришедшие, но ещё не показанные
 let cursor = 0;
 let noEvents = false;    // старый адаптер/сервер без ленты — падаем обратно на лог
 let raf = null;
 let last = 0;
-const show = { stage: "", done: [], counter: null, lastAt: 0, error: "" };
+const show = { stage: "", done: [], counter: null, lastAt: 0, stageAt: 0, error: "",
+               // Боковая дорожка: разбор экрана идёт ПАРАЛЛЕЛЬНО расшифровке (25.09), и главную
+               // стадию он подменять не имеет права — у него свой слот и своя строка.
+               side: null };
+let startedAt = 0;       // unix-время начала работы (с сервера) — для часов
 
 function dispatch(e) {
   scenes.wave.apply(e);
   scenes.text.apply(e);
   scenes.screen.apply(e);
+  scenes.send.apply(e);
+  scenes.relisten.apply(e);
   show.lastAt = performance.now() / 1000;
+  // ⚠️ Начало стадии помним отдельно от последнего события: подпись говорит, сколько идёт САМА
+  // СТАДИЯ, а не сколько молчит канал. Без этой метки в тишине было нечего сказать, кроме «без
+  // вестей» (владелец, 25.09: «статус слишком неуверенный»).
+  // ⚠️ Боковая дорожка не перезапускает часы ГЛАВНОЙ стадии: диаризация идёт своим чередом,
+  // и «сколько она уже идёт» не должно обнуляться каждым кадром экрана.
+  if ((e.t === "stage.start" || e.t === "client.step") && e.lane !== "side") show.stageAt = show.lastAt;
+  if (e.t === "client.step" && e.lane === "side") {
+    show.side = { stage: e.step, say: e.say || "", done: Boolean(e.done),
+                  counter: show.side && show.side.stage === e.step ? show.side.counter : null };
+    return;                                   // главную стадию боковая работа не трогает
+  }
+  if (e.t === "screen.frame" && show.side && !show.side.done && e.n) {
+    show.side.counter = { i: e.done || 0, n: e.n, say: `кадр ${e.done || 0} из ${e.n}` };
+  }
+  // Детектор кадров: показываем, сколько записи он просмотрел — это первые полминуты работы,
+  // и раньше они шли вообще без единого слова.
+  if (e.t === "screen.scan" && show.side && e.total) {
+    show.side.counter = { i: e.sec || 0, n: e.total,
+                          say: `${clock(e.sec)} из ${clock(e.total)}` };
+  }
   if (e.t === "stage.start") { show.stage = e.stage; show.counter = null; }
   if (e.t === "stage.end" && !show.done.includes(e.stage)) show.done.push(e.stage);
   if (e.t === "chunk.done") show.counter = { i: e.i, n: show.counter?.n || 0 };
   if (e.t === "chunk.start") show.counter = { i: e.i, n: e.n };
   if (e.t === "turn.done") show.counter = { i: e.done, n: e.n };
   if (e.t === "client.step") show.stage = e.step;
+  // ⚠️ У отправки счётчик в БАЙТАХ (видео — 95 % веса пакета), поэтому подпись к нему своя:
+  // «512 МБ из 1.2 ГБ» вместо голых чисел, которые дал бы общий шаблон «i из n».
+  if (e.t === "upload.file") {
+    show.counter = { i: e.moved || 0, n: e.whole || 0,
+                     say: `${fileSize(e.moved)} из ${fileSize(e.whole)}` };
+  }
   if (e.t === "manifest.ready") showCard(e);
 }
 
@@ -115,13 +149,21 @@ function pump() {
 }
 
 function paintState() {
-  const s = showState({ ...show, now: performance.now() / 1000 });
+  const s = showState({ ...show, now: performance.now() / 1000,
+                        elapsed: startedAt ? Date.now() / 1000 - startedAt : null });
   const bar = id("bar");
   if (s.pct != null) bar.firstElementChild.style.width = `${Math.min(100, s.pct)}%`;
   bar.classList.toggle("err", s.mood === "ошибка");
+  const beside = id("work-side");
+  beside.textContent = s.side || "";
+  beside.hidden = !s.side;
   const line = id("work-mood");
-  line.textContent = s.say;
+  // Стадия и числа — разными узлами: перелив идёт ТОЛЬКО по названию стадии, иначе мигали бы и
+  // цифры счётчика, а это уже рябь.
+  line.replaceChildren(el("span", { class: "st" }, s.label),
+                       ...(s.tail ? [el("span", { class: "tail" }, s.tail)] : []));
   line.className = "mood " + s.mood;
+  id("work-clock").textContent = s.clock;
 }
 
 async function pollEvents() {
@@ -303,11 +345,12 @@ async function tick() {
   if (job.stage === "running") scenes.wave.fit();
 
   show.error = job.stage === "error" ? `Не получилось: ${job.error}` : "";
+  startedAt = job.stage === "running" ? (job.started || 0) : 0;
   if (job.stage === "running" || job.stage === "error") paintState();
 
   if (job.stage === "running") {
-    const min = Math.max(1, Math.round((Date.now() / 1000 - job.started) / 60));
-    id("work-msg").textContent = `Идёт ${min} мин. Окно можно свернуть — работа не прервётся, но закрывать его нельзя.`;
+    // Часы теперь в шапке работы; здесь остаётся только предупреждение про окно.
+    id("work-msg").textContent = "Окно можно свернуть — работа не прервётся, но закрывать его нельзя.";
     id("work-msg").className = "msg";
   } else if (job.stage === "error") {
     id("work-msg").textContent = "";
@@ -420,10 +463,16 @@ id("go").onclick = async () => {
     lastLogLen = -1;
     cursor = 0;
     queue.length = 0;
-    show.stage = ""; show.done = []; show.counter = null; show.error = "";
+    show.stage = ""; show.done = []; show.counter = null; show.error = ""; show.side = null;
     show.lastAt = performance.now() / 1000;
+    show.stageAt = show.lastAt;
     scenes.wave.reset();
     scenes.text.reset();
+    scenes.send.reset();
+    // ⚠️ Сцену экрана раньше не сбрасывали — и кадры прошлого прогона оставались на экране.
+    // С параллельным разбором это стало видно сразу: она теперь появляется в первые секунды.
+    scenes.screen.reset();
+    scenes.relisten.reset();
     await tick();
   } catch (e) { id("msg").textContent = e.message; id("msg").className = "msg bad"; }
 };

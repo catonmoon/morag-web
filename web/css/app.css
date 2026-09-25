@@ -536,7 +536,7 @@ body[data-chat-missing] .chat-tools{display:none}
 .mo-cards{display:flex;flex-direction:column;gap:9px}
 .mo-cards:not(:empty){margin-top:2px}
 .mo-cards .moment:not(.open){display:none}
-.moment{display:grid;grid-template-columns:40px 1fr auto;column-gap:13px;row-gap:5px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 13px;box-shadow:var(--shadow-sm);transition:border-color .2s;scroll-margin-top:80px;cursor:pointer}
+.moment{display:grid;grid-template-columns:40px minmax(0,1fr) auto;column-gap:13px;row-gap:5px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 13px;box-shadow:var(--shadow-sm);transition:border-color .2s;scroll-margin-top:80px;cursor:pointer}
 .moment:hover,.moment.open{border-color:color-mix(in srgb,var(--accent) 42%,var(--line))}
 .moment.flash{animation:flash 1.1s ease}
 /* Дорога назад к сноске — первая строка карточки, как «вернуться к тексту» в
@@ -585,7 +585,7 @@ body[data-chat-missing] .chat-tools{display:none}
 .tx[hidden]{display:none}
 .tx-cap{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 4px 8px}
 .tx-foot .m-prov-sum{padding:0}
-.tx-seg{text-align:left;border:0;background:transparent;cursor:pointer;font-family:var(--serif);font-size:14.5px;line-height:1.5;color:var(--ink-dim);padding:4px 8px;border-radius:7px;transition:background .15s,color .15s;width:100%}
+.tx-seg{text-align:left;border:0;background:transparent;cursor:pointer;font-family:var(--serif);font-size:14.5px;line-height:1.5;color:var(--ink-dim);padding:4px 8px;border-radius:7px;transition:background .15s,color .15s;width:100%;overflow-wrap:anywhere}
 .tx-seg:hover{background:color-mix(in srgb,var(--ink) 6%,transparent);color:var(--ink)} .tx-seg.on{background:var(--accent-wash);color:var(--ink)}
 .tx-who{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--sonar);margin-right:7px} .tx-seg.on .tx-who{color:var(--accent)}
 .ans-actions{display:flex;align-items:center;gap:6px;padding-top:2px}
@@ -618,6 +618,8 @@ footer .disc{margin-left:auto;font-style:italic;opacity:.85;text-align:right}
 @media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}.caret{animation:none;opacity:1}}
 
 /* --- разметка внутри ответа (модель отдаёт markdown) --- */
+/* Ответ агента цитирует ту же расшифровку и приносит ссылки целиком — рвём и его. */
+.answer{overflow-wrap:anywhere}
 .answer > *:first-child{margin-top:0}
 .answer > *:last-child{margin-bottom:0}
 .answer h3,.answer h4{font-family:var(--serif);font-weight:700;line-height:1.2;
@@ -869,7 +871,13 @@ body[data-view="chat"] .chat-tools{display:flex}
   font-family:var(--mono);font-size:11px;color:var(--ink-faint);background:none;border:0;
   cursor:pointer;padding:0;font-variant-numeric:tabular-nums}
 .kar-tc:hover{color:var(--accent)}
-.kar-text{margin:0;font-family:var(--serif);font-size:17px;line-height:1.75;color:var(--ink-dim)}
+/* ⚠️⚠️ Перенос ВНУТРИ слова обязателен и здесь: расшифровка — чужой текст, и ASR на зависшем
+   звуке выдаёт слово в сотню букв («ИИИИИИ…», живой случай 25.09). Без переноса такое слово
+   задаёт минимальную ширину колонки, и разъезжается вся страница, а не одна реплика. Та же
+   болезнь, что уже лечена у аннотации карточки (`.rec-summary`): там её приносили голые ссылки
+   с percent-кодированной кириллицей. */
+.kar-text{margin:0;font-family:var(--serif);font-size:17px;line-height:1.75;color:var(--ink-dim);
+  overflow-wrap:anywhere}
 /* Первая строка абзаца и время рядом с ней должны стоять на ОДНОЙ базовой линии; выравнивание
    по базовой линии сетки делает это само, без подгонки отступов под кегль. */
 /* Подсветка ВСПЫХИВАЕТ плавно, а СНИМАЕТСЯ мгновенно.

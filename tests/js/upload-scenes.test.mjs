@@ -132,6 +132,8 @@ const { budget, state, MIN_RATE, MAX_RATE } = await import(join(repo, "tools/ui/
 const { textScene } = await import(join(repo, "tools/ui/text.js"));
 const { screenScene } = await import(join(repo, "tools/ui/screen.js"));
 const { wave } = await import(join(repo, "tools/ui/wave.js"));
+const { sendScene, size } = await import(join(repo, "tools/ui/send.js"));
+const { relistenScene } = await import(join(repo, "tools/ui/relisten.js"));
 
 // --- темп ------------------------------------------------------------------------------------
 
@@ -170,17 +172,37 @@ const { wave } = await import(join(repo, "tools/ui/wave.js"));
   assert.equal(live.mood, "работает");
   assert.match(live.say, /84 из 195/);
 
-  const thinking = state({ stage: "pass1", lastAt: 10, now: 25 });
+  const thinking = state({ stage: "pass1", stageAt: 5, lastAt: 10, now: 25 });
   assert.equal(thinking.mood, "считает", "стадия молчит по своей природе — так и говорим");
   assert.match(thinking.say, /обычно/);
+  // ⚠️ Мерим время СТАДИИ (20 с с её начала), а не тишину канала (15 с): «что происходит»
+  // отвечает первое. Прежняя подпись говорила «120 с без вестей — работа, вероятно, идёт», и
+  // владелец справедливо назвал её неуверенной (25.09).
+  assert.match(thinking.say, /0:20/);
+  assert.ok(!/вероятно/.test(thinking.say), "догадок в подписи нет");
 
-  const lost = state({ stage: "final-round", lastAt: 10, now: 70 });
+  const lost = state({ stage: "final-round", stageAt: 0, lastAt: 10, now: 70 });
   assert.equal(lost.mood, "молчит");
-  assert.match(lost.say, /без вестей/);
+  assert.match(lost.say, /тихо 1:00/, "молчание канала — короткой пометкой, а не целой фразой");
+
+  const late = state({ stage: "diarize", stageAt: 1, lastAt: 10, now: 400 });
+  assert.match(late.say, /дольше обычного/, "идёт втрое дольше типичного — говорим прямо");
+
+  // Часы: общее время работы приходит снаружи (у окна — от сервера, у стенда — из трассы).
+  assert.equal(state({ stage: "pass2", lastAt: 0, now: 0, elapsed: 754 }).clock, "12:34");
+  assert.equal(state({ stage: "pass2", lastAt: 0, now: 0 }).clock, "", "не передали — не врём");
 
   const failed = state({ error: "Не получилось: стек не отвечает" });
   assert.equal(failed.mood, "ошибка");
   assert.equal(failed.pct, null, "у ошибки полосы нет вовсе");
+  assert.equal(failed.label, "Не получилось: стек не отвечает", "ошибка — это и есть подпись");
+}
+{
+  // Подпись разобрана на части: переливается ТОЛЬКО название стадии, числа остаются ровными.
+  const live = state({ stage: "pass2", counter: { i: 84, n: 195 }, lastAt: 10, now: 11 });
+  assert.equal(live.label, "распознаю по кускам");
+  assert.equal(live.tail, " · 84 из 195");
+  assert.equal(live.say, live.label + live.tail);
 }
 
 // --- сцена исправлений -------------------------------------------------------------------------
@@ -334,12 +356,14 @@ const { wave } = await import(join(repo, "tools/ui/wave.js"));
   const root = new El("div");
   const scene = screenScene(root);
   scene.apply({ t: "client.step", step: "screen" });
-  scene.apply({ t: "screen.frame", path: "/w/rec/slides/s001.jpg", at: 61, kind: "slide",
+  // ⚠️ `sec` — секунда кадра В ЗАПИСИ. У события есть и `at`, но это время прогона (`emit`), и
+  // раньше секунда кадра ехала под тем же именем, затирая конверт.
+  scene.apply({ t: "screen.frame", path: "/w/rec/slides/s001.jpg", sec: 61, at: 812, kind: "slide",
                 title: "Очереди", text: "Схема потока", done: 1, n: 3 });
   assert.equal(scene.state().done, 1);
   assert.match(root.textContent, /Очереди/);
   assert.match(root.textContent, /1:01/, "время кадра подписано минутами");
-  scene.apply({ t: "screen.frame", path: "/w/rec/slides/s002.jpg", at: 90,
+  scene.apply({ t: "screen.frame", path: "/w/rec/slides/s002.jpg", sec: 90, at: 840,
                 error: "ConnectError: сертификат", done: 2, n: 3 });
   assert.equal(scene.state().bad, 1, "упавший кадр посчитан");
   assert.match(root.textContent, /не далось 1/, "…и сказан вслух, а не пропущен молча");
@@ -361,8 +385,173 @@ const { wave } = await import(join(repo, "tools/ui/wave.js"));
     SPEAKER_01: { voice: "Speaker_41", name: "" } } });
   assert.match(root.textContent, /Мария Кузнецова/, "имя встало в легенду");
   assert.ok(!root.textContent.includes("SPEAKER_00"), "сырой метки больше нет");
-  // ⚠️ «Не спросили» и «спросили, но голос новый» — разные вещи, и чинятся по-разному.
-  assert.match(root.textContent, /Speaker_41 · новый/, "безымянный назван честно");
+  // ⚠️ Безымянный голос — просто корпусный номер: приписка «новый» лишняя (владелец, 25.09),
+  // номер и сам значит «сервер знает голос, но имени нет». А `SPEAKER_00` — «не спросили вовсе».
+  assert.match(root.textContent, /Speaker_41/, "безымянный — под корпусным номером");
+  assert.ok(!root.textContent.includes("новый"), "без приписки");
+}
+
+// --- наведение: волна ↔ легенда --------------------------------------------------------------
+
+{
+  // ⚠️ Мыши в заглушке нет, поэтому наведение вызывается снаружи — тем же путём, каким его
+  // зовут обработчики канваса и строк легенды. Проверяется СОСТОЯНИЕ, а не пиксели.
+  const root = new El("div");
+  const scene = wave(root);
+  scene.apply({ t: "job.meta", audio_sec: 600 });
+  scene.apply({ t: "diar.spans", speakers: ["SPEAKER_00", "SPEAKER_01"],
+                spans: [[0, 100, 0], [100, 240, 1]] });
+  scene.apply({ t: "voices.named", by_label: { SPEAKER_01: { voice: "Speaker_9", name: "Нина Ковалёва" } } });
+
+  scene.hoverSecond(150);
+  assert.equal(scene.state().hoverIdx, 1, "по секунде нашли голос");
+  assert.match(scene.state().tip, /Нина Ковалёва · 2:30/, "в подсказке имя и время");
+  const legend = root.children.at(-1);
+  assert.ok(legend.children[0].classList.contains("dim"), "чужой голос в легенде приглушён");
+  assert.ok(legend.children[1].classList.contains("on"), "а этот — выделен");
+
+  scene.hoverSecond(400);
+  assert.equal(scene.state().hoverIdx, -1, "за отрезками голоса нет");
+  assert.match(scene.state().tip, /тишина/);
+
+  scene.hoverVoice(0);                       // курсор в легенде
+  assert.equal(scene.state().hoverIdx, 0);
+  assert.equal(scene.state().hoverSec, null, "из легенды подсвечивается голос, а не секунда");
+  scene.hoverSecond(null);
+  assert.equal(scene.state().hoverIdx, -1, "ушли — сняли подсветку");
+}
+
+// --- кадры экрана и искры прогресса ----------------------------------------------------------
+
+{
+  const root = new El("div");
+  const scene = wave(root);
+  scene.apply({ t: "job.meta", audio_sec: 600 });
+  scene.apply({ t: "diar.spans", speakers: ["SPEAKER_00"], spans: [[0, 600, 0]] });
+  // ⚠️ Секунды кадров нужны волне, а не только сцене экрана: человек спрашивает «откуда этот
+  // снимок» (владелец, 25.09), и ответ — засечка на шкале записи.
+  scene.apply({ t: "screen.frame", path: "/w/rec/slides/s001.jpg", sec: 61, kind: "slide" });
+  scene.apply({ t: "screen.frame", path: "/w/rec/slides/s002.jpg", sec: 145, kind: "slide" });
+  assert.equal(scene.state().frames, 2);
+  assert.equal(scene.state().frameAt, 145, "выделен последний показанный кадр");
+  scene.apply({ t: "screen.frame", path: "", error: "ConnectError" });
+  assert.equal(scene.state().frames, 2, "кадр без секунды засечкой не становится");
+
+  scene.apply({ t: "chunk.start", i: 1, n: 40, from: 0, to: 28, spk: "SPEAKER_00" });
+  assert.equal(scene.state().cursor, 28, "кромка прогресса идёт по кускам");
+  scene.reset();
+  assert.equal(scene.state().frames, 0, "сброс убирает и кадры");
+}
+
+// --- две дорожки работы ------------------------------------------------------------------------
+
+{
+  // ⚠️ Разбор экрана идёт ПАРАЛЛЕЛЬНО расшифровке (25.09), и главную стадию он подменять не
+  // имеет права: «делю по голосам» обязано оставаться правдой, пока рядом сыплются кадры.
+  const both = state({ stage: "diarize", stageAt: 0, lastAt: 9, now: 10,
+                       side: { stage: "screen", say: "описания кадров (Vision)",
+                               counter: { i: 12, n: 40, say: "кадр 12 из 40" } } });
+  assert.equal(both.label, "делю по голосам", "главная стадия своя");
+  assert.equal(both.side, "описания кадров (Vision) · кадр 12 из 40", "боковая — своей строкой");
+
+  const alone = state({ stage: "diarize", lastAt: 9, now: 10 });
+  assert.equal(alone.side, "", "боковой работы нет — и строки нет");
+
+  // Полоса двигается от обеих дорожек, но вес стадии считается ОДИН раз: ту же стадию конвейер
+  // потом пришлёт главной дорожкой, когда доделает экран.
+  const idle = state({ stage: "diarize", lastAt: 9, now: 10, side: null }).pct;
+  const busy = state({ stage: "diarize", lastAt: 9, now: 10,
+                       side: { stage: "screen", say: "экран", counter: { i: 20, n: 40 } } }).pct;
+  assert.ok(busy > idle, "параллельная работа двигает полосу");
+  const twice = state({ stage: "screen", lastAt: 9, now: 10,
+                        side: { stage: "screen", say: "экран", done: true } }).pct;
+  const once = state({ stage: "screen", lastAt: 9, now: 10 }).pct;
+  assert.equal(twice, once, "тот же экран не посчитан дважды");
+  const counted = state({ stage: "pass2", done: ["screen"], lastAt: 9, now: 10,
+                          side: { stage: "screen", say: "экран", done: true } }).pct;
+  assert.equal(counted, state({ stage: "pass2", done: ["screen"], lastAt: 9, now: 10 }).pct);
+}
+
+// --- отправка пакета на сайт -------------------------------------------------------------------
+
+{
+  // ⚠️ Отправка видео — единственный шаг, который человек ждёт, глядя в окно, и до 25.09 её
+  // было видно только в консоли. Проверяется то, что делает сцену полезной: список файлов
+  // известен ДО первого байта, у каждого своя полоса, общий счёт — В БАЙТАХ (видео это 95 %
+  // веса пакета, и счёт «файл 2 из 3» стоял бы на месте всё время, которое реально идёт).
+  const root = new El("div");
+  const scene = sendScene(root);
+  assert.equal(root.attrs.hidden, "", "до отправки сцены не видно");
+
+  scene.apply({ t: "upload.begin", files: [{ name: "artifact.json", bytes: 400000 },
+                                           { name: "video.mp4", bytes: 1200000000 }],
+                bytes: 1200400000 });
+  assert.equal(scene.state().files, 2);
+  assert.equal(root.attrs.hidden, undefined, "сцена показалась");
+  assert.match(root.textContent, /расшифровка/, "имя файла человеческое, а не artifact.json");
+  assert.match(root.textContent, /видео/);
+
+  scene.apply({ t: "upload.file", name: "video.mp4", i: 2, n: 2, sent: 600000000,
+                bytes: 1200000000, moved: 600400000, whole: 1200400000 });
+  assert.match(root.textContent, /572 МБ из 1\.1 ГБ/, "сколько уехало у самого файла");
+  assert.match(root.textContent, /50 %/, "общий счёт — по байтам");
+  assert.equal(scene.state().moved, 600400000);
+
+  scene.apply({ t: "upload.file", name: "video.mp4", i: 2, n: 2, sent: 1200000000,
+                bytes: 1200000000, moved: 1200400000, whole: 1200400000, done: true });
+  scene.apply({ t: "upload.state", state: "building" });
+  assert.match(root.textContent, /сервер собирает запись/, "состояние сервера — словами");
+  scene.apply({ t: "upload.state", state: "done", search: "later" });
+  assert.match(root.textContent, /плановой индексации/, "и «в поиске позже» сказано прямо");
+  assert.equal(scene.state().server, "done");
+
+  scene.reset();
+  assert.equal(scene.state().files, 0);
+  assert.equal(root.attrs.hidden, "");
+}
+{
+  assert.equal(size(0), "0 Б");
+  assert.equal(size(2048), "2 КБ");
+  assert.equal(size(50 * 1024 * 1024), "50 МБ");
+  assert.equal(size(3 * 1024 * 1024 * 1024), "3.0 ГБ");
+}
+{
+  // Подпись работы берёт у счётчика ЕГО слова, когда они есть: у отправки счёт в байтах.
+  const s = state({ stage: "send", counter: { i: 5, n: 10, say: "512 МБ из 1.0 ГБ" },
+                    lastAt: 0, now: 0 });
+  assert.equal(s.tail, " · 512 МБ из 1.0 ГБ");
+  assert.ok(s.pct > 0);
+}
+
+// --- переслушивание -----------------------------------------------------------------------------
+
+{
+  // ⚠️ Стадия меняет расшифровку, и человек обязан видеть ЧТО именно: пары «было → стало», включая
+  // неудачи. Спрятанная неудача читается как «от меня что-то скрыли».
+  const root = new El("div");
+  const scene = relistenScene(root);
+  assert.equal(root.attrs.hidden, "", "до стадии сцены не видно");
+
+  scene.apply({ t: "client.step", step: "relisten" });
+  assert.equal(root.attrs.hidden, undefined, "шаг стадии показывает сцену");
+
+  scene.apply({ t: "relisten.span", from: 610, to: 623, kind: "char",
+                was: "И".repeat(12), now: "Нам нужно обсудить это отдельно." });
+  assert.match(root.textContent, /10:10–10:23/, "время места подписано");
+  assert.match(root.textContent, /Нам нужно обсудить/);
+  assert.match(root.textContent, /И{12}/, "прежний текст остаётся виден — зачёркнутым");
+
+  scene.apply({ t: "relisten.span", from: 700, to: 712, kind: "stretch", verdict: "тишина",
+                was: "Ага.", now: "" });
+  scene.apply({ t: "relisten.span", from: 800, to: 812, kind: "word", verdict: "петля осталась",
+                was: "ах ах ах", now: "ах ах ах" });
+  assert.equal(scene.state().seen, 3);
+  assert.match(root.textContent, /тишина/, "честная тишина показана, а не спрятана");
+  assert.match(root.textContent, /не вышло/, "неудача показана тоже");
+
+  scene.reset();
+  assert.equal(scene.state().seen, 0);
+  assert.equal(root.attrs.hidden, "");
 }
 
 console.log("ok upload-scenes");

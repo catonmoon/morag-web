@@ -50,7 +50,16 @@
   <section id="work">
     <h2>Идёт работа</h2>
     <div class="bar" id="bar"><i></i></div>
-    <p class="mood" id="work-mood"></p>
+    <div class="work-head">
+      <p class="mood" id="work-mood"></p>
+      <span class="clock" id="work-clock"></span>
+    </div>
+    <!-- Параллельная работа (разбор экрана идёт, пока считается расшифровка) — своей строкой:
+         подменять ею главную стадию было бы враньём, а прятать — значит снова молчать. -->
+    <p class="beside" id="work-side" hidden></p>
+    <div class="scene" id="scene-send" hidden>
+      <h3>Отправка на сайт <span>— что уехало и что делает сервер</span></h3>
+    </div>
     <div class="scene">
       <h3>Звук и голоса <span>— цветом отмечено, кто говорит; распознанное закрашивается</span></h3>
       <div id="scene-wave"></div>
@@ -58,6 +67,10 @@
     <div class="scene" id="scene-screen" hidden>
       <h3>Экран <span>— кадр и то, что на нём увидели</span></h3>
     </div>
+    <div class="scene" id="scene-relisten" hidden>
+      <h3>Переслушивание <span>— места, где модель сорвалась: что было и что слышно на самом деле</span></h3>
+    </div>
+
     <div class="scene" id="scene-text" hidden>
       <h3>Текст <span>— сперва печатается по мере распознавания, потом правки идут прямо в нём</span></h3>
     </div>
@@ -67,25 +80,34 @@
 <script type="module">
 // Стенд намеренно НЕ переиспользует `app.js`: тот занят сетью и формой. Общее здесь — сами
 // сцены и правила показа, то есть ровно то, что настраивается.
+import { clock as mmss, el } from "./dom.js";
 import { state as showState } from "./play.js";
 import { textScene } from "./text.js";
 import { screenScene } from "./screen.js";
+import { relistenScene } from "./relisten.js";
+import { sendScene, size as fileSize } from "./send.js";
 import { wave } from "./wave.js";
 
 const id = (x) => document.getElementById(x);
 const scenes = { wave: wave(id("scene-wave")), text: textScene(id("scene-text")),
-                 screen: screenScene(id("scene-screen")) };
+                 screen: screenScene(id("scene-screen")), send: sendScene(id("scene-send")),
+                 relisten: relistenScene(id("scene-relisten")) };
 let trace = [];
 let at = 0;
 let timer = null;
-const show = { stage: "", done: [], counter: null, lastAt: 0, error: "" };
+const show = { stage: "", done: [], counter: null, lastAt: 0, stageAt: 0, error: "", side: null };
 let clock = 0;               // «сейчас» стенда: время трассы, а не настенное
 
 function paint() {
-  const s = showState({ ...show, now: clock });
+  // Время стенда — время ТРАССЫ: часы должны показывать прогон, а не то, сколько я на него смотрю.
+  const s = showState({ ...show, now: clock, elapsed: clock });
   if (s.pct != null) id("bar").firstElementChild.style.width = `${Math.min(100, s.pct)}%`;
-  id("work-mood").textContent = s.say;
+  id("work-mood").replaceChildren(el("span", { class: "st" }, s.label),
+                                  ...(s.tail ? [el("span", { class: "tail" }, s.tail)] : []));
   id("work-mood").className = "mood " + s.mood;
+  id("work-clock").textContent = s.clock;
+  id("work-side").textContent = s.side || "";
+  id("work-side").hidden = !s.side;
   id("pos").textContent = trace.length
     ? `${at} из ${trace.length} · ${Math.round(clock)} с прогона` : "трассы нет";
 }
@@ -94,13 +116,34 @@ function feed(e) {
   if (id("only-bad").checked && e.t === "turn.fix" && e.ok) return;
   clock = e.at ?? clock;
   show.lastAt = clock;
+  // ⚠️ Событие боковой дорожки НЕ трогает главную стадию (и сцены его всё равно получают —
+  // выхода отсюда нет: сцена экрана показывает себя именно по нему).
+  const side = e.t === "client.step" && e.lane === "side";
+  if (side) {
+    show.side = { stage: e.step, say: e.say || "", done: Boolean(e.done),
+                  counter: show.side && show.side.stage === e.step ? show.side.counter : null };
+  }
+  if (e.t === "screen.frame" && show.side && !show.side.done && e.n) {
+    show.side.counter = { i: e.done || 0, n: e.n, say: `кадр ${e.done || 0} из ${e.n}` };
+  }
+  if (e.t === "screen.scan" && show.side && e.total) {
+    show.side.counter = { i: e.sec || 0, n: e.total, say: `${mmss(e.sec)} из ${mmss(e.total)}` };
+  }
+  if (!side && (e.t === "stage.start" || e.t === "client.step")) show.stageAt = clock;
   if (e.t === "stage.start") { show.stage = e.stage; show.counter = null; }
+  if (e.t === "client.step" && !side) show.stage = e.step;
   if (e.t === "stage.end" && !show.done.includes(e.stage)) show.done.push(e.stage);
   if (e.t === "chunk.start") show.counter = { i: e.i, n: e.n };
   if (e.t === "turn.done") show.counter = { i: e.done, n: e.n };
+  if (e.t === "upload.file") {
+    show.counter = { i: e.moved || 0, n: e.whole || 0,
+                     say: `${fileSize(e.moved)} из ${fileSize(e.whole)}` };
+  }
   scenes.wave.apply(e);
   scenes.text.apply(e);
   scenes.screen.apply(e);
+  scenes.send.apply(e);
+  scenes.relisten.apply(e);
 }
 
 function step(n = 1) {
@@ -136,10 +179,13 @@ function load(text) {
 function reset() {
   if (timer) play();
   at = 0; clock = 0;
-  show.stage = ""; show.done = []; show.counter = null; show.error = "";
+  show.stage = ""; show.done = []; show.counter = null; show.error = ""; show.stageAt = 0;
+  show.side = null;
   scenes.wave.reset();
   scenes.text.reset();
   scenes.screen.reset();
+  scenes.send.reset();
+  scenes.relisten.reset();
   scenes.wave.fit();
   paint();
 }

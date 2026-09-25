@@ -639,7 +639,16 @@ def run_step(argv: list[str], env: dict, record: Path) -> subprocess.CompletedPr
                 fields = json.loads(line[len("@progress "):])
             except ValueError:
                 continue
+            # Детектор кадров говорит, сколько записи просмотрел, — это не кадр, а ход работы.
+            if fields.pop("scan", None):
+                emit("screen.scan", **fields)
+                continue
             frame = str(fields.pop("frame", "") or "")
+            # ⚠️⚠️ Секунда КАДРА приезжает от `describe_slides` под именем `at`, а `at` в конверте
+            # события — время прогона. Поле молча затирало конверт: стенд играет трассу по `at` и
+            # на первом же кадре прыгал в начало записи. Секунда кадра зовётся `sec`.
+            if "at" in fields:
+                fields["sec"] = fields.pop("at")
             emit("screen.frame", path=str(record / frame) if frame else "", **fields)
             continue
         say(line)
@@ -647,14 +656,25 @@ def run_step(argv: list[str], env: dict, record: Path) -> subprocess.CompletedPr
     return subprocess.CompletedProcess(argv, proc.returncode)
 
 
-def screen(work: Path, video: Path, record: Path) -> None:
+def screen(work: Path, video: Path, record: Path, *, only_video: bool = False) -> None:
+    """Разбор экрана. `only_video` — первые три шага, которым хватает САМОГО ВИДЕО.
+
+    ⚠️⚠️ Деление не техническое, а по входным данным: шкала кадров, заставка и описания Vision
+    знают только видеофайл, а «вот здесь» (`screen_refs`) привязывается к СЛОВАМ расшифровки, и
+    аннотации собираются уже из обоих сайдкаров. Отсюда и весь смысл круга: первую тройку можно
+    считать ПАРАЛЛЕЛЬНО расшифровке — и занять ею те первые минуты, где окно раньше молчало
+    (владелец, 25.09: «пока идёт диаризация и первое прослушивание, ничего не происходит»).
+    ⚠️ Завершение (сайдкары в пакет, `slides.zip`, отметка `screen.done`) делает только ПОЛНЫЙ
+    прогон: после ранней тройки экран ещё не готов.
+    """
     done = work / "screen.done"
     if done.is_file():
         say("экран уже снят — пропускаю")
         return
     if not has_video_stream(video):
         say("в файле нет видеодорожки — экран разбирать нечего")
-        done.write_text("no-video\n", encoding="utf-8")
+        if not only_video:
+            done.write_text("no-video\n", encoding="utf-8")
         return
     py = VIDEO_PY if VIDEO_PY.is_file() else Path(sys.executable)
     env = {**os.environ, "ASR_STACK_ENV": str(STACK_ENV), "MORAG_WEB_CORPUS": str(temp_family())}
@@ -665,12 +685,25 @@ def screen(work: Path, video: Path, record: Path) -> None:
         ("обращения к экрану", ["screen_refs.py", str(record), "--resolve", "--video", str(video)]),
         ("аннотации", ["make_annotations.py", str(record)]),
     ]
+    if only_video:
+        steps = steps[:3]
+        # ⚠️⚠️ Ранний Vision УСТУПАЕТ расшифровке: у сайта на человека 4 слота к шлюзу с очередью
+        # в 180 с (`app/config.py::upload.llm.slots`), а адаптер на своих стадиях шлёт до восьми
+        # запросов разом. Три наших кадра в очереди — это стадия расшифровки, ждущая нашего
+        # показа; меняем скорость описаний (их и так есть чем занять первые минуты) на то, чтобы
+        # главная работа не ждала. После расшифровки полный прогон идёт с обычной тройкой.
+        steps[2] = (steps[2][0], [*steps[2][1], "--concurrency", "1"])
     env["MORAG_PROGRESS"] = "1"
     for label, argv in steps:
         say(f"экран: {label}")
+        emit("client.step", step="screen", lane="side", say=label)
         proc = run_step([str(py), str(HERE / argv[0]), *argv[1:]], env, record)
         if proc.returncode:
             raise Step(f"экран: «{label}» не прошёл (код {proc.returncode}); повторный запуск продолжит отсюда")
+    if only_video:
+        emit("client.step", step="screen", lane="side", say="экран разобран", done=True)
+        say("экран: кадры и описания готовы — обращения свяжем, когда будет расшифровка")
+        return
     for name in SIDECARS:
         if (record / name).is_file():
             shutil.copy2(record / name, work / name)
@@ -683,24 +716,56 @@ def screen(work: Path, video: Path, record: Path) -> None:
     say(f"экран готов: кадров {len(frames)}")
 
 
+def screen_ahead(work: Path, video: Path, record: Path) -> None:
+    """Ранняя тройка шагов экрана — фоном, пока идёт расшифровка.
+
+    ⚠️ Падение здесь НЕ роняет прогон: расшифровка главная, экран — дополнение, а недостающее
+    доделает полный `screen()` после неё (каждый шаг возобновляем). Обратный порядок значимости
+    стоил бы человеку двадцати минут работы из-за одного неудачного кадра.
+    """
+    try:
+        screen(work, video, record, only_video=True)
+    except Step as error:
+        say(f"экран пока не вышел ({error}); доберём после расшифровки")
+        emit("client.step", step="screen", lane="side", say="экран отложен", done=True)
+    except Exception as error:  # noqa: BLE001 - показ не имеет права ронять загрузку
+        say(f"экран пока не вышел ({type(error).__name__}: {error}); доберём после расшифровки")
+        emit("client.step", step="screen", lane="side", say="экран отложен", done=True)
+
+
 # --- шаг 3: загрузка ------------------------------------------------------------------------
 
 class Progress:
-    """Файл, который считает отданные байты: у видео это единственный способ увидеть, что идёт."""
+    """Файл, который считает отданные байты: у видео это единственный способ увидеть, что идёт.
 
-    def __init__(self, path: Path, label: str) -> None:
+    ⚠️ Двух получателей у счётчика два, и темп у них РАЗНЫЙ: в лог строкой раз в пять секунд
+    (иначе он превращается в простыню), в окно — событием раз в семьсот миллисекунд, потому что
+    там полоса, и на пяти секундах она выглядела бы зависшей. До 25.09 второго получателя не
+    было вовсе: загрузка гигабайтного видео шла только в консоль (владелец: «тут уже надо
+    показывать в браузере»).
+    """
+
+    BEAT = 0.7          # как часто событие в окно
+
+    def __init__(self, path: Path, label: str, on_move=None) -> None:
         self.fh = path.open("rb")
         self.total = path.stat().st_size
         self.sent = 0
         self.label = label
         self.last = 0.0
+        self.on_move = on_move
+        self.beat = 0.0
 
     def read(self, n: int = -1) -> bytes:
         chunk = self.fh.read(n if n > 0 else 1 << 20)
         self.sent += len(chunk)
-        if self.total > 50_000_000 and time.monotonic() - self.last > 5:
-            self.last = time.monotonic()
+        now = time.monotonic()
+        if self.total > 50_000_000 and now - self.last > 5:
+            self.last = now
             say(f"  {self.label}: {self.sent * 100 // max(1, self.total)} % ({size_of(self.sent)} из {size_of(self.total)})")
+        if self.on_move and (not chunk or now - self.beat > self.BEAT):
+            self.beat = now
+            self.on_move(self.sent, not chunk)
         return chunk
 
     def __iter__(self):
@@ -714,6 +779,7 @@ class Progress:
 
 def upload(work: Path, site: str, cookies: dict[str, str], manifest: dict, files: list[tuple[str, Path]],
            video: Path, wait: bool) -> str:
+    emit("client.step", step="send", say="отправляю на сайт")
     state_path = work / "state.json"
     state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.is_file() else {}
     with client(site, cookies, timeout=httpx.Timeout(600.0, connect=30.0)) as c:
@@ -728,15 +794,30 @@ def upload(work: Path, site: str, cookies: dict[str, str], manifest: dict, files
             state["server_id"] = rid
             state_path.write_text(json.dumps(state), encoding="utf-8")
         sent = set(state.get("sent") or [])
-        for name, path in files + [(manifest["video"], video)]:
-            if name in sent or not path.is_file():
-                continue
-            say(f"загружаю {name} ({size_of(path.stat().st_size)})")
-            body = Progress(path, name)
+        # ⚠️ Очередь считаем ЗАРАНЕЕ и целиком: окно рисует список файлов с полосами, и «сколько
+        # всего» должно быть известно до первого байта, а не выясняться по ходу.
+        queue = [(name, path) for name, path in files + [(manifest["video"], video)]
+                 if name not in sent and path.is_file()]
+        sizes = {name: path.stat().st_size for name, path in queue}
+        whole = sum(sizes.values())
+        emit("upload.begin", files=[{"name": n, "bytes": sizes[n]} for n, _ in queue], bytes=whole)
+        moved = 0
+        for i, (name, path) in enumerate(queue, 1):
+            size = sizes[name]
+            say(f"загружаю {name} ({size_of(size)})")
+
+            def moving(done: int, fin: bool, *, name=name, i=i, size=size, base=moved) -> None:
+                emit("upload.file", name=name, i=i, n=len(queue), sent=done, bytes=size,
+                     moved=base + done, whole=whole, done=bool(fin))
+
+            moving(0, False)
+            body = Progress(path, name, on_move=moving)
             r = c.put(f"/api/upload/{rid}/files/{name}", content=body,
                       headers={"Content-Length": str(body.total), "Content-Type": "application/octet-stream"})
             if r.status_code != 200:
                 raise Step(f"{name}: сайт ответил {r.status_code}: {r.text[:300]}")
+            moving(size, True)
+            moved += size
             sent.add(name)
             state["sent"] = sorted(sent)
             state_path.write_text(json.dumps(state), encoding="utf-8")
@@ -744,6 +825,7 @@ def upload(work: Path, site: str, cookies: dict[str, str], manifest: dict, files
         if r.status_code != 200:
             raise Step(f"приём не запустился ({r.status_code}): {r.json().get('detail', r.text)}")
         say(f"пакет принят, сервер собирает запись {rid}")
+        emit("upload.state", state="accepted")
         if not wait:
             return rid
         seen = ""
@@ -753,17 +835,31 @@ def upload(work: Path, site: str, cookies: dict[str, str], manifest: dict, files
             if s.get("state") != seen:
                 seen = s.get("state")
                 say(f"  сервер: {seen}")
+                emit("upload.state", state=seen or "")
             if seen == "done":
                 say(f"готово: {site}{s.get('url') or ''}")
                 globals()["LAST_SEARCH"] = s.get("search") or ""
                 if s.get("search") == "later":
                     say("  (в поиске запись появится после ближайшей плановой индексации — обычно ночью)")
+                emit("upload.state", state="done", search=s.get("search") or "")
                 return rid
             if seen == "error":
+                emit("upload.state", state="error", error=str(s.get("error") or "")[:300])
                 raise Step(f"сервер не принял запись: {s.get('error')}")
 
 
 # --- run ---------------------------------------------------------------------------------------
+
+def as_list(value) -> list[str]:
+    """Поле-список приходит ДВУМЯ видами: из формы — строкой через запятую, из карточки перед
+    отправкой — уже списком (фронт разбирает его сам). Принимаем оба.
+
+    ⚠️ Раньше на этом пути стоял безусловный `.split(",")`, и кнопка «Загрузить» из карточки
+    падала на `AttributeError` у списка — то есть ровно там, ради чего карточка и сделана.
+    """
+    items = value.split(",") if isinstance(value, str) else list(value or [])
+    return [str(x).strip() for x in items if str(x).strip()]
+
 
 def check_fields(video: Path, title: str, date: str, slides: str | None) -> dict:
     """Проверить то, что ввёл человек, ДО долгой работы: час расшифровки и отказ на загрузке
@@ -789,14 +885,22 @@ def check_fields(video: Path, title: str, date: str, slides: str | None) -> dict
 def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: list[str] | None = None,
              tags: list[str] | None = None, summary: str = "", slides: str | None = None,
              site: str | None = None, with_stack: bool = False, with_screen: bool = True,
-             wait: bool = True, title_auto: bool = False, should_upload=None) -> str:
+             wait: bool = True, title_auto: bool = False, should_upload=None, rid: str = "") -> str:
     """Весь путь записи: расшифровка → экран → пакет на сайт. Общий для командной строки и для
-    страницы (`upload_ui.py`) — шаги, возобновление и сообщения обязаны быть одни и те же."""
+    страницы (`upload_ui.py`) — шаги, возобновление и сообщения обязаны быть одни и те же.
+
+    ⚠️⚠️ `rid` — адрес РАБОЧЕГО КАТАЛОГА, и его можно задать снаружи. По умолчанию он считается из
+    названия и даты (`check_fields`), а значит МЕНЯЕТСЯ, стоит поправить любое из них. Владелец
+    поправил метаданные в карточке перед отправкой — и вторая половина пути не нашла ни
+    `artifact.json`, ни кадров в новом каталоге: запись пошла расшифровываться заново, двадцать
+    минут впустую (25.09). Поэтому окно передаёт адрес первого прогона, а название и дата
+    остаются тем, чем и были, — полями манифеста: идентификатор записи на сайте выдаёт сервер.
+    """
     video = Path(video).expanduser().resolve()
     fields = check_fields(video, title, date, slides)
-    rid, ext, slides_pdf = fields["id"], fields["ext"], fields["slides"]
-    speakers = [s for s in (speakers or []) if s]
-    tags = [t for t in (tags or []) if t]
+    rid, ext, slides_pdf = (rid or fields["id"]), fields["ext"], fields["slides"]
+    speakers = as_list(speakers)
+    tags = as_list(tags)
     site_url, cookies = load_session(site)
     work = HOME / rid
     work.mkdir(parents=True, exist_ok=True)
@@ -815,6 +919,21 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
             threading.Thread(target=early_voices, daemon=True, name="voices",
                              args=(work, fields, site_url, cookies, rid, known_voices)).start()
 
+        # ⚠️⚠️ Разбор экрана уезжает ВПЕРЁД и идёт параллельно расшифровке (владелец, 25.09):
+        # первые минуты (звук из видео + диаризация) в окне были пустыми — расшифровки ещё нет
+        # вовсе, а кадрам и описаниям речь не нужна. Работа всё равно нужна, просто теперь она
+        # накладывается на ожидание, а не добавляется к нему.
+        # ⚠️ Каталог черновика создаём ЗДЕСЬ, до потока: на возобновлённом прогоне `transcribe`
+        # вернётся мгновенно, и `local_record` полез бы в `temp_family()` ровно тогда же, когда
+        # её создаёт поток.
+        draft = temp_family() / "records" / rid
+        screen_early = None
+        if with_screen:
+            draft.mkdir(parents=True, exist_ok=True)
+            screen_early = threading.Thread(target=screen_ahead, daemon=True, name="screen",
+                                            args=(work, video, draft))
+            screen_early.start()
+
         artifact = transcribe(work, video, rid, title, speakers, on_spans=spans_ready)
         emit("client.step", step="voices", say="отпечатки голосов")
         voiceprint(work, artifact)
@@ -824,6 +943,9 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
         if with_screen:
             emit("client.step", step="record", say="черновик записи")
             record = local_record(work, artifact, rid, title, date)
+            # Ждём фоновую тройку: обращения к экрану опираются на её сайдкар.
+            if screen_early is not None:
+                screen_early.join()
             emit("client.step", step="screen", say="экран из видео")
             screen(work, video, record)
     finally:

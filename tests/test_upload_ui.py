@@ -376,6 +376,33 @@ def test_the_send_checkbox_stands_before_the_scenes(server):
     assert 'class="line-check"' in html, "у строки своё правило, а не инлайновые заплатки"
 
 
+def test_the_work_head_carries_a_clock_next_to_the_stage(server):
+    """Часы с начала работы — отдельным узлом рядом с подписью стадии (владелец, 25.09:
+    «давай тут сделаем хороший красивый таймер»). ⚠️ Узел и стиль живут в РАЗНЫХ файлах, и
+    разъехаться им ничего не мешает — как уже было с ключом темы, который не доезжал до сайта.
+    """
+    base, _ = server
+    html = get(f"{base}/?t=tok")[1]
+    assert 'id="work-clock"' in html and 'class="work-head"' in html
+    assert html.index('id="work-mood"') < html.index('id="work-clock"'), "стадия слева, часы справа"
+    css = raw(f"{base}/ui/upload.css")[1].decode()
+    assert ".work-head" in css and "mood-shimmer" in css, "перелив подписи описан стилем"
+
+
+def test_a_hundred_letter_word_does_not_stretch_the_window(server):
+    """⚠️⚠️ Расшифровка приходит из ASR, а он на зависшем звуке выдаёт слово в сотню букв
+    («ИИИИИИ…» — нашёл владелец 25.09). Замерено в браузере: без переноса внутри слова поле
+    текста растёт с 842 до 1544 px, и вся страница получает 480 px горизонтальной прокрутки.
+    ⚠️ `overflow-x: hidden` от этого НЕ спасает: элемент не обрезается, он вырастает сам.
+    """
+    base, _ = server
+    css = raw(f"{base}/ui/upload.css")[1].decode()
+    blocks = [b for b in css.split("}") if "overflow-wrap:anywhere" in b]
+    covered = " ".join(b.split("{")[0] for b in blocks)
+    for who in (".tx-body", ".sc-text", ".sc-title", ".mood"):
+        assert who in covered, f"{who} не переносит длинное слово: {covered}"
+
+
 def test_fields_from_the_card_beat_the_auto_pick(server, monkeypatch):
     """⚠️ Карточка перед отправкой — последнее слово человека. Поля из неё ложатся в
     задание прогона; автоподбор заполняет только пустое — значит, не перебьёт."""
@@ -390,4 +417,46 @@ def test_fields_from_the_card_beat_the_auto_pick(server, monkeypatch):
     assert code == 200
     assert started and started[0]["event"] == "Доклады" and started[0]["tags"] == ["kafka"]
     assert started[0]["title"] == "Норм", "нетронутое осталось"
+    assert started[0]["id"] == "2026-03-12-norm", "адрес прогона передан — расшифровка не повторится"
     upload_ui.STATE.update({"stage": "idle", "sent": False, "send": True, "fields": {}})
+
+
+def test_editing_the_card_does_not_retranscribe(server, monkeypatch, tmp_path):
+    """⚠️⚠️ Правка полей в карточке НЕ ТРОГАЕТ рабочий каталог (владелец, 25.09: «почему-то
+    распознавание пошло ещё раз, хотя я не просил»).
+
+    Адрес каталога считался из названия и даты — поправил название, получил новый каталог без
+    `artifact.json` и кадров, то есть полный пересчёт. Теперь адрес передаётся снаружи и живёт
+    весь путь записи; на сайте идентификатор всё равно выдаёт сервер по манифесту.
+    Заодно закреплено, что поля-списки из карточки доходят списками, а не падают на `.split`.
+    """
+    base, tmp = server
+    calls: list[dict] = []
+    monkeypatch.setattr(upload, "pipeline", lambda video, **kw: calls.append(kw) or "server-id")
+    monkeypatch.setattr(upload, "load_session", lambda site=None: ("https://site.example.org", {}))
+    video = str(tmp / "Downloads" / "talk.mp4")
+    post(f"{base}/api/start?t=tok", {"video": video, "title": "Норм", "date": "2026-03-12",
+                                     "send": False})
+    for _ in range(50):
+        if calls:
+            break
+        time.sleep(0.05)
+    first = upload_ui.STATE["id"]
+    assert calls[0]["rid"] == first == "2026-03-12-norm"
+
+    # человек поправил в карточке название и дату и нажал «Загрузить»
+    upload_ui.STATE.update({"stage": "done", "sent": False, "send": False})
+    code, _ = post(f"{base}/api/send?t=tok",
+                   {"on": True, "fields": {"title": "Совсем другое название", "date": "2026-04-01",
+                                           "speakers": ["Нина Ковалёва"], "tags": ["kafka", "streams"]}})
+    assert code == 200
+    for _ in range(50):
+        if len(calls) > 1:
+            break
+        time.sleep(0.05)
+    assert len(calls) == 2, "второй проход запустился"
+    assert calls[1]["rid"] == first, "каталог тот же — расшифровка и экран уже посчитаны"
+    assert calls[1]["title"] == "Совсем другое название" and calls[1]["date"] == "2026-04-01"
+    assert calls[1]["speakers"] == ["Нина Ковалёва"] and calls[1]["tags"] == ["kafka", "streams"], \
+        "списки из карточки доходят списками"
+    upload_ui.STATE.update({"stage": "idle", "id": "", "sent": False, "send": True, "fields": {}})

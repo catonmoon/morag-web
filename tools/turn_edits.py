@@ -75,7 +75,8 @@ def _spread(texts: list[str], lo: float, hi: float) -> list[list]:
     return out
 
 
-def retime(old: list[list], now: list[str], bounds: tuple[float, float]) -> list[list]:
+def retime(old: list[list], now: list[str], bounds: tuple[float, float],
+           span: tuple[float, float] | None = None) -> list[list]:
     """Слова куска после правки: что не тронули — с ТЕМ ЖЕ временем, байт в байт.
 
     Сравниваем списки слов, а не строки: правка приходит текстом, но времена привязаны к словам,
@@ -84,10 +85,18 @@ def retime(old: list[list], now: list[str], bounds: tuple[float, float]) -> list
 
     `bounds` — время, свободное вокруг куска (конец предыдущего слова реплики и начало
     следующего). Без него вставка на самом краю осталась бы без места.
+
+    `span` — ГДЕ ИМЕННО звучит вставленное, если правка это знает. Без него вставка растягивается
+    на всю свободную паузу, и в длинной паузе это врёт дважды: цитата ведёт мимо места, а слово
+    «длиной в восемь секунд» выглядит как потерянная речь для датчика порчи (замерено на починке
+    корпуса: 315 растянутых слов стало 430 — и все новые были вставками). Применяется только когда
+    вставка в правке ОДНА: с несколькими один отрезок не поделить, и тогда честнее прежний способ.
     """
     sm = SequenceMatcher(a=[w[0] for w in old], b=now, autojunk=False)
+    codes = sm.get_opcodes()
+    one_insert = sum(1 for tag, *_ in codes if tag == "insert") == 1
     out: list[list] = []
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+    for tag, i1, i2, j1, j2 in codes:
         if tag == "equal":
             out.extend([list(w) for w in old[i1:i2]])
         elif tag == "delete":
@@ -98,6 +107,10 @@ def retime(old: list[list], now: list[str], bounds: tuple[float, float]) -> list
         else:  # insert — берём паузу между соседями
             lo = old[i1 - 1][2] if i1 > 0 else bounds[0]
             hi = old[i1][1] if i1 < len(old) else bounds[1]
+            if span and one_insert:
+                a, b = max(lo, float(span[0])), min(max(lo, hi), float(span[1]))
+                if b > a:                      # отрезок обязан лежать внутри свободного места
+                    lo, hi = a, b
             out.extend(_spread(now[j1:j2], lo, max(lo, hi)))
     return out
 
@@ -152,12 +165,21 @@ def apply(x: dict, edits: list[dict], warn=print) -> list[dict]:
         j = i + len(was)
         lo = words[i - 1][2] if i > 0 else wt[t].get("start", words[0][1])
         hi = words[j][1] if j < len(words) else wt[t].get("end", words[-1][2])
-        fresh = retime(words[i:j], now, (float(lo), float(hi)))
+        span = edit.get("span")
+        fresh = retime(words[i:j], now, (float(lo), float(hi)),
+                       tuple(span) if isinstance(span, (list, tuple)) and len(span) == 2 else None)
         wt[t]["words"] = words[:i] + fresh + words[j:]
-        # Границы реплики следуют за словами: правка могла задеть первое или последнее.
+        # Границы реплики РАСШИРЯЮТСЯ за словами, но не сужаются: правка могла задеть первое или
+        # последнее слово, а границу реплики поставил ДИАРИЗАТОР — он слышал там речь, и слово,
+        # уехавшее внутрь, этого не отменяет.
+        # ⚠️⚠️ Сужение ломало следующую правку той же реплики: у записи, где владелец укоротил
+        # петлю руками, начало реплики уехало с 10-й секунды на 20-ю, и вставке в эту дыру не
+        # осталось ни места, ни времени — все её слова получили нулевую ширину на 20.5.
         if wt[t]["words"]:
-            wt[t]["start"] = round(float(wt[t]["words"][0][1]), 2)
-            wt[t]["end"] = round(float(wt[t]["words"][-1][2]), 2)
+            first, last = float(wt[t]["words"][0][1]), float(wt[t]["words"][-1][2])
+            start, end = wt[t].get("start"), wt[t].get("end")
+            wt[t]["start"] = round(min(first, float(start)) if start is not None else first, 2)
+            wt[t]["end"] = round(max(last, float(end)) if end is not None else last, 2)
         text = " ".join(w[0] for w in wt[t]["words"])
         if t < len(turns):
             # `raw` не трогаем: это то, что расслышал ASR, и по нему потом ищут самопредставления.

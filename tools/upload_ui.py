@@ -231,10 +231,14 @@ def start(fields: dict) -> dict:
         video = Path(fields.get("video") or "").expanduser()
         checked = upload.check_fields(video, fields.get("title") or "", fields.get("date") or "",
                                       fields.get("slides") or None)
+        # ⚠️⚠️ Адрес прогона — ОДИН на весь путь записи. Задан (значит, это продолжение: человек
+        # поправил поля в карточке и нажал «Загрузить») — берём его, и расшифровка с экраном
+        # остаются посчитанными. Иначе запись пересчитывалась целиком из-за правки названия.
+        rid = str(fields.get("id") or "").strip() or checked["id"]
         # ⚠️ Рубрику больше НЕ ТРЕБУЕМ (владелец, 24.09): не выбрали — выберем сами по
         # готовой расшифровке (`upload.auto_fields`), из списка самого сайта. Заставлять человека
         # выбирать до прогона было нечестно: о чём запись, толком знает только расшифровка.
-        STATE.update({"stage": "running", "id": checked["id"], "error": "", "url": "",
+        STATE.update({"stage": "running", "id": rid, "error": "", "url": "",
                       "started": time.time(), "finished": 0.0, "sent": False,
                       "send": bool(fields.get("send", True)), "fields": dict(fields)})
         upload.LOG.clear()
@@ -244,11 +248,12 @@ def start(fields: dict) -> dict:
             upload.pipeline(
                 video,
                 title=fields["title"], date=fields["date"], event=fields.get("event") or "",
-                speakers=[s.strip() for s in (fields.get("speakers") or "").split(",") if s.strip()],
-                tags=[t.strip() for t in (fields.get("tags") or "").split(",") if t.strip()],
+                # Списком или строкой через запятую — как пришло (`upload.as_list`).
+                speakers=upload.as_list(fields.get("speakers")),
+                tags=upload.as_list(fields.get("tags")),
                 summary=fields.get("summary") or "", slides=fields.get("slides") or None,
                 with_stack=bool(fields.get("stack", True)), with_screen=not fields.get("no_screen"),
-                wait=True, title_auto=bool(fields.get("title_auto")),
+                wait=True, title_auto=bool(fields.get("title_auto")), rid=rid,
                 should_upload=lambda: bool(STATE.get("send", True)))
             site, _ = upload.load_session(None)
             sent = bool(STATE.get("send", True))
@@ -426,7 +431,10 @@ class Handler(BaseHTTPRequestHandler):
                 # Работа уже кончилась без отправки, а теперь просят отправить — запускаем тот же
                 # прогон: он возобновляемый и дойдёт сразу до загрузки.
                 if STATE["send"] and STATE.get("stage") == "done" and not STATE.get("sent"):
-                    self._json(start({**(STATE.get("fields") or {}), "send": True}))
+                    # ⚠️ Адрес прогона передаём ЯВНО: без него правка названия или даты в карточке
+                    # заводила новый рабочий каталог и расшифровка шла заново (владелец, 25.09).
+                    self._json(start({**(STATE.get("fields") or {}), "send": True,
+                                      "id": STATE.get("id") or ""}))
                     return
                 self._json({"ok": True, "send": STATE["send"]})
                 return

@@ -8,7 +8,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import threading
 from pathlib import Path
 
 import httpx
@@ -116,6 +118,76 @@ def test_run_transcribes_uploads_in_order_and_waits(env, monkeypatch):
     assert [n for n, _ in fake.uploads] == ["artifact.json", "video.mp4"], "видео — последним"
     assert dict(fake.uploads)["video.mp4"] == 3000
     assert fake.finishes == 1 and fake.status_calls >= 2
+
+
+def test_the_screen_runs_ahead_of_the_transcript_and_never_breaks_it(env, monkeypatch):
+    """⚠️⚠️ Первые минуты (звук из видео + диаризация) в окне были ПУСТЫМИ: расшифровки ещё нет,
+    показывать нечего (владелец, 25.09: «может быть там можно параллельную работу какую-то
+    сделать, которую можно отобразить?»). Разбор экрана уехал вперёд — кадрам и описаниям речь
+    не нужна, нужна только она двум последним шагам.
+
+    Здесь закреплены три вещи: ранняя тройка стартует ДО обращения к адаптеру, поздний полный
+    прогон доделывает остальное, и падение ранней тройки НЕ роняет запись.
+    """
+    fake, video, tmp = env
+    upload.save_session("https://site.example.org", {"morag_session": "abc"})
+    order: list[str] = []
+    early = threading.Event()
+
+    def fake_screen(work, vid, record, *, only_video=False):
+        order.append("рано" if only_video else "полностью")
+        record.mkdir(parents=True, exist_ok=True)
+        if only_video:
+            early.set()
+            raise upload.Step("кадр не разобрался")     # худший случай: ранняя тройка упала
+
+    real_transcribe = upload.transcribe
+
+    def fake_transcribe(work, vid, rid, title, speakers, on_spans=None):
+        # ⚠️ Проверяем ПАРАЛЛЕЛЬНОСТЬ, а не порядок строк: важно, что экран уже работает, пока
+        # расшифровка идёт. Сравнение «кто первым дописал в список» зависело бы от планировщика.
+        assert early.wait(5), "разбор экрана не начался, пока шла расшифровка"
+        order.append("расшифровка")
+        return real_transcribe(work, vid, rid, title, speakers, on_spans=on_spans)
+
+    monkeypatch.setattr(upload, "screen", fake_screen)
+    monkeypatch.setattr(upload, "transcribe", fake_transcribe)
+    sys.argv = ["upload.py", "run", str(video), "--title", "Kafka без боли", "--date", "2026-03-12"]
+    assert upload.main() == 0, "падение ранней тройки не роняет запись — расшифровка главнее"
+    assert order == ["рано", "расшифровка", "полностью"], order
+    assert fake.finishes == 1, "запись всё равно уехала на сайт"
+    upload.EVENTS.clear()
+
+
+def test_the_upload_reports_itself_to_the_window_not_only_to_the_console(env):
+    """⚠️ Загрузка видео — гигабайты по сети, и она дольше всей остальной отправки. В окне про
+    неё не было НИЧЕГО: проценты печатались строками в свёрнутый лог (владелец, 25.09: «при
+    подтверждении загрузки видео на сайт тут уже надо показывать в браузере»).
+
+    Здесь закреплён КАНАЛ: шаг назван, список файлов известен ДО первого байта, у каждого файла
+    свои байты и общий вес пакета, а состояния сервера доезжают до окна словами.
+    """
+    fake, video, tmp = env
+    upload.save_session("https://site.example.org", {"morag_session": "abc"})
+    upload.EVENTS.clear()
+    assert run(video) == 0
+    kinds = [e["t"] for e in upload.EVENTS]
+    assert "upload.begin" in kinds and "upload.file" in kinds
+
+    step = [e for e in upload.EVENTS if e["t"] == "client.step" and e["step"] == "send"]
+    assert step, "шаг отправки назван — иначе подпись работы врёт про прежнюю стадию"
+
+    begin = next(e for e in upload.EVENTS if e["t"] == "upload.begin")
+    assert [f["name"] for f in begin["files"]] == ["artifact.json", "video.mp4"]
+    assert begin["bytes"] == sum(f["bytes"] for f in begin["files"]) > 0
+
+    moves = [e for e in upload.EVENTS if e["t"] == "upload.file" and e["name"] == "video.mp4"]
+    assert moves and moves[-1]["done"] and moves[-1]["sent"] == 3000
+    assert moves[-1]["moved"] == begin["bytes"] == moves[-1]["whole"], "общий счёт — по байтам"
+
+    states = [e["state"] for e in upload.EVENTS if e["t"] == "upload.state"]
+    assert states[0] == "accepted" and states[-1] == "done", states
+    upload.EVENTS.clear()
 
 
 def test_second_run_resumes_without_redoing(env):
@@ -305,6 +377,23 @@ def test_emit_survives_a_field_named_like_its_own_argument():
     upload.emit("screen.frame", kind="slide", title="Очереди", i=3)
     evt = upload.EVENTS[-1]
     assert evt["t"] == "screen.frame" and evt["kind"] == "slide" and evt["i"] == 3
+    upload.EVENTS.clear()
+
+
+def test_a_frames_second_does_not_overwrite_the_runtime(env, tmp_path):
+    """⚠️⚠️ У кадра экрана есть СВОЯ секунда — место в записи, — и `describe_slides` присылает её
+    полем `at`. В конверте `at` занято временем прогона, и поле его молча затирало: стенд играет
+    трассу по `at` и на первом же кадре прыгал в начало. Секунда кадра зовётся `sec`.
+    """
+    script = tmp_path / "fake_screen.py"
+    script.write_text('print(\'@progress \' + \'{"frame": "slides/s001.jpg", "at": 61.0, '
+                      '"kind": "slide", "done": 1, "n": 2}\')\n', encoding="utf-8")
+    upload.EVENTS.clear()
+    upload.run_step([sys.executable, str(script)], dict(os.environ), tmp_path / "rec")
+    evt = next(e for e in upload.EVENTS if e["t"] == "screen.frame")
+    assert evt["sec"] == 61.0, "секунда кадра приехала под своим именем"
+    assert evt["at"] != 61.0, "время прогона осталось временем прогона"
+    assert evt["path"].endswith("rec/slides/s001.jpg") and evt["kind"] == "slide"
     upload.EVENTS.clear()
 
 

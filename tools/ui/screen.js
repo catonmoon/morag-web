@@ -8,7 +8,7 @@
 // ⚠️ Кадр берём у СВОЕГО сервера (`/api/frame`), а не встраиваем в событие: картинка — это
 // десятки килобайт, а событий за прогон тысячи, и лента событий обязана оставаться дешёвой.
 
-import { el } from "./dom.js";
+import { clock, el } from "./dom.js";
 
 export function screenScene(root, { frameUrl = null } = {}) {
   const head = el("p", { class: "tx-head" });
@@ -46,7 +46,8 @@ export function screenScene(root, { frameUrl = null } = {}) {
   function kindOf(e) {
     const known = { slide: "слайд", app: "окно программы", browser: "браузер",
                     terminal: "терминал", people: "люди в кадре", other: "экран" };
-    const at = Number.isFinite(e.at) ? `${Math.floor(e.at / 60)}:${String(Math.floor(e.at % 60)).padStart(2, "0")} · ` : "";
+    // ⚠️ `sec` — секунда кадра В ЗАПИСИ; `at` у события занято временем прогона (см. `emit`).
+    const at = Number.isFinite(e.sec) ? `${clock(e.sec)} · ` : "";
     return at + (known[e.kind] || (e.error ? "ошибка" : "экран"));
   }
 

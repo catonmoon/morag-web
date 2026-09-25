@@ -321,6 +321,9 @@
     "tests/test_corpora_api.py": {
       "status": "ours"
     },
+    "tests/test_degenerate.py": {
+      "status": "ours"
+    },
     "tests/test_demo_template.py": {
       "status": "ours"
     },
@@ -420,6 +423,9 @@
       "status": "edited",
       "sha256": "40e1c7e963cf4b6ff0384bde44c53bd5dd6cee67d8798cb907a09265a6cbb70f"
     },
+    "tools/degenerate.py": {
+      "status": "ours"
+    },
     "tools/fetch_audio.py": {
       "status": "ours"
     },
@@ -456,7 +462,13 @@
     "tools/ui/play.js": {
       "status": "ours"
     },
+    "tools/ui/relisten.js": {
+      "status": "ours"
+    },
     "tools/ui/screen.js": {
+      "status": "ours"
+    },
+    "tools/ui/send.js": {
       "status": "ours"
     },
     "tools/ui/text.js": {

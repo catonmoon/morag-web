@@ -21,6 +21,11 @@ video_batch.py         всё это по корпусу; видео — лок�
 Зависимости — `tools/requirements-video.txt` (numpy, scipy, pillow, httpx) и ffmpeg. Адрес и
 ключ Vision/Instruct — файл стека транскрибации (`ASR_STACK_ENV`, `ASR_LLM_BASE_URL`, `OR_KEY`).
 
+⚠️ **Расшифровка нужна ровно одному шагу.** `screen_refs.py` читает `record.words.json` — он
+привязывает «вот здесь» к словам; `make_annotations.py` ждёт его результата. Шкала, заставка и
+описания знают только видеофайл. Отсюда и порядок в окне загрузки: первые три шага идут
+ПАРАЛЛЕЛЬНО расшифровке (`tools/upload.py::screen(only_video=True)`), остальное — после неё.
+
 ## Что замерено и почему так
 
 - **Декодировать программно.** `-hwaccel videotoolbox` при выходе 320×180 в десять раз

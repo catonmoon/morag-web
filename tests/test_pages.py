@@ -199,3 +199,20 @@ def test_records_say_whether_they_reached_the_search(client, tmp_path, monkeypat
     stamp.write_text(_json.dumps({"at": 1}), encoding="utf-8")   # прогон был до всего
     body = client.get("/api/records").json()
     assert all(r["indexed"] is False for r in body["records"])
+
+
+def test_чужой_текст_переносится_внутри_слова(client):
+    """⚠️⚠️ Расшифровка — ЧУЖОЙ текст, и ASR на зависшем звуке выдаёт слово в сотню букв
+    («ИИИИИИ…», живой случай 25.09). Без переноса внутри слова такое слово задаёт минимальную
+    ширину колонки: замерено в браузере — у страницы появляется 447 px горизонтальной прокрутки,
+    и разъезжается вся раскладка, а не одна реплика.
+
+    Проверяется правило, а не пиксели: в тесте раскладки нет, а свойство обязано быть у КАЖДОГО
+    места, где показывается текст корпуса или ответ модели.
+    """
+    css = client.get("/css/app.css").text
+    blocks = [b for b in css.split("}") if "overflow-wrap:anywhere" in b]
+    covered = " ".join(b.split("{")[0] for b in blocks)
+    for who in (".kar-text", ".tx-seg", ".answer", ".rec-summary"):
+        assert who in covered, f"{who} не переносит длинное слово: {covered}"
+

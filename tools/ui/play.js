@@ -6,6 +6,10 @@
 // приходу, картинка будет дёргаться: то ничего, то двенадцать карточек за кадр. Поэтому буфер и
 // темп — но темп только РАСПРЕДЕЛЯЕТ то, что уже случилось, и ничего не придумывает.
 
+// ⚠️ Часы берём общие (`dom.clock`, «м:сс»): то же время в том же виде показывают метка
+// исправления в тексте и подсказка на волне — своя копия формата разъехалась бы с ними.
+import { clock } from "./dom.js";
+
 export const TARGET_SEC = 1.5;   // за сколько стараемся разобрать накопившееся
 export const MIN_RATE = 6;       // событий в секунду, когда их мало: живо, но читаемо
 export const MAX_RATE = 120;     // потолок: пачка в 500 событий разберётся за 4 с, а не за минуту
@@ -40,6 +44,9 @@ export const STAGE = {
   pass1: { w: 6, say: "слушаю целиком — черновик", typical: 60 },
   glossary: { w: 6, say: "собираю термины", typical: 60 },
   pass2: { w: 17, say: "распознаю по кускам", typical: 180 },
+  // Переслушивание: мест на запись единицы, полторы-две секунды на место. Замерено на живом
+  // прогоне: 6 мест за 17 с на трёхминутном куске.
+  relisten: { w: 2, say: "переслушиваю сомнительные места", typical: 25 },
   "final-round": { w: 40, say: "правлю сущности", typical: 570 },
   speakers: { w: 2, say: "узнаю голоса", typical: 10 },
   naming: { w: 1, say: "ищу имена", typical: 10 },
@@ -49,31 +56,73 @@ const TOTAL = Object.values(STAGE).reduce((s, x) => s + x.w, 0);
 
 /**
  * Состояние показа по событиям. `now` инжектируется — иначе ни тест, ни стенд не построить.
- * Возвращает `{pct, mood, say}`, где mood ∈ работает | считает | молчит.
+ *
+ * Возвращает `{pct, mood, label, tail, say, clock}`:
+ *   `label` — что делаем (переливается в окне), `tail` — числа при этом, `say` — то же одной
+ *   строкой (тесты и стенд), `clock` — общее время работы, если его передали.
+ *
+ * ⚠️ Прежняя подпись в тишине говорила «120 с без вестей — работа, вероятно, идёт» (владелец,
+ * 25.09: «статус слишком неуверенный»). Неуверенность была не в словах, а в том, ЧТО мерили:
+ * тишину канала вместо времени стадии. Стадия идёт две минуты и обычно столько и занимает —
+ * это факт, и его теперь и говорим; молчание канала осталось, но отдельной короткой пометкой.
  */
-export function state({ stage = "", done = [], counter = null, lastAt = 0, now = 0, error = "" }) {
-  if (error) return { pct: null, mood: "ошибка", say: error };
+export function state({ stage = "", done = [], counter = null, lastAt = 0, stageAt = 0,
+                        elapsed = null, now = 0, error = "", side = null }) {
+  const total = elapsed == null ? "" : clock(elapsed);
+  // ⚠️ Боковая дорожка (разбор экрана идёт ПАРАЛЛЕЛЬНО расшифровке, 25.09) считается отдельно и
+  // НЕ подменяет главную стадию: подпись «делю по голосам» обязана оставаться правдой, пока
+  // рядом сыплются кадры. Поэтому у неё своя строка и свой вклад в полосу.
+  const beside = sideOf(side);
+  if (error) return { pct: null, mood: "ошибка", label: error, tail: "", say: error, clock: total,
+                      side: beside };
 
   let pct = done.reduce((s, name) => s + (STAGE[name]?.w || 0), 0);
   const cur = STAGE[stage];
   if (cur && counter && counter.n > 0) pct += cur.w * Math.min(1, counter.i / counter.n);
+  pct += sideWeight(side, done, stage);
   pct = Math.round((pct / TOTAL) * 100);
 
   const quiet = now - lastAt;
+  const stageSec = stageAt ? Math.max(0, now - stageAt) : 0;
   const label = cur ? cur.say : (stage || "готовлюсь");
-  if (quiet <= SILENT_AFTER) {
-    const tail = counter && counter.n ? ` · ${counter.i} из ${counter.n}` : "";
-    return { pct, mood: "работает", say: label + tail };
+  let mood = "работает";
+  // ⚠️ У счётчика бывает СВОЯ подпись: отправка считает байты, и «536870912 из 1288490188»
+  // человеку не говорит ничего — она присылает «512 МБ из 1.2 ГБ».
+  let tail = counter && counter.n ? ` · ${counter.say || `${counter.i} из ${counter.n}`}` : "";
+  if (quiet > SILENT_AFTER) {
+    mood = quiet >= LOST_AFTER ? "молчит" : "считает";
+    // Сколько идёт САМА СТАДИЯ и сколько она обычно занимает — вот что отвечает на «что там».
+    // Стадии молчат по своей природе: пасс-1 — один блокирующий вызов, глоссарий — два запроса.
+    tail += stageSec > 1 ? ` · ${clock(stageSec)}` : "";
+    if (cur) {
+      tail += stageSec > cur.typical * 1.5 ? ", дольше обычного" : `, обычно ~${human(cur.typical)}`;
+    }
+    // ⚠️ Молчание канала не выбрасываем, а ужимаем до пометки: «дольше обычного» и «стадия не
+    // подаёт признаков» — разные вещи, и вторую человек обязан видеть, если она случилась.
+    if (mood === "молчит") tail += ` · тихо ${clock(quiet)}`;
   }
-  if (quiet < LOST_AFTER && cur) {
-    // Стадия молчит по своей природе: пасс-1 — один блокирующий вызов, глоссарий — два запроса
-    // к модели. Говорим, сколько уже идёт и сколько обычно занимает, а не крутим спиннер.
-    return { pct, mood: "считает",
-             say: `${label} · ${Math.round(quiet)} с, обычно около ${human(cur.typical)}` };
-  }
-  return { pct, mood: "молчит",
-           say: `${Math.round(quiet)} с без вестей${stage ? ` (стадия «${label}»)` : ""} — `
-                + "работа, вероятно, идёт" };
+  return { pct, mood, label, tail, say: label + tail, clock: total, stageSec, quiet, side: beside };
+}
+
+/** Что писать про боковую работу: «разбираю экран · кадр 12 из 40» или пусто, если её нет. */
+function sideOf(side) {
+  if (!side || !side.say || side.done) return "";
+  const c = side.counter;
+  const tail = c && c.n ? ` · ${c.say || `${c.i} из ${c.n}`}` : "";
+  return side.say + tail;
+}
+
+/** Вклад боковой стадии в полосу — теми же весами: работа настоящая, пусть и параллельная.
+ *
+ * ⚠️ Вес считается ОДИН раз: та же стадия приходит и главной дорожкой (после расшифровки
+ * конвейер доделывает экран обычным шагом), и полоса иначе перевалила бы за сто.
+ */
+function sideWeight(side, done, stage) {
+  const cur = side && STAGE[side.stage];
+  if (!cur || side.stage === stage || done.includes(side.stage)) return 0;
+  if (side.done) return cur.w;
+  const c = side.counter;
+  return c && c.n > 0 ? cur.w * Math.min(1, c.i / c.n) : 0;
 }
 
 function human(sec) {

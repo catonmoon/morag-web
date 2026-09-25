@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import os
 import shlex
 import shutil
 import subprocess
@@ -152,17 +153,49 @@ def _probe_av(path: Path) -> dict:
                 "duration": float(container.duration / av.time_base) if container.duration else 0.0}
 
 
-def extract_frames(video: "Path | Source", p: Params) -> np.ndarray:
-    """Серые кадры (N, H, W) uint8 через трубу; ⚠️ без hwaccel — см. шапку модуля."""
+# ⚠️ Канал прогресса для того, кто запустил нас подпроцессом (окно загрузки) — тот же, что у
+# `describe_slides.py`. Заведён 25.09: разбор экрана уехал вперёд и идёт ПАРАЛЛЕЛЬНО расшифровке,
+# и первые полминуты прогона это единственная работа в окне. Молчащий шаг там выглядит так же
+# мёртво, как и раньше, — поэтому детектор говорит, сколько записи он уже просмотрел.
+PROGRESS = os.environ.get("MORAG_PROGRESS") == "1"
+
+
+def progress(**fields) -> None:
+    if not PROGRESS:
+        return
+    print("@progress " + json.dumps(fields, ensure_ascii=False), flush=True)
+
+
+def extract_frames(video: "Path | Source", p: Params, total: float = 0.0) -> np.ndarray:
+    """Серые кадры (N, H, W) uint8 через трубу; ⚠️ без hwaccel — см. шапку модуля.
+
+    ⚠️ Труба читается ПО КУСКАМ, а не одним `run()`: только так видно, сколько записи уже
+    просмотрено. Байты те же (собираются в `bytearray` и читаются `np.frombuffer` без копии),
+    поведение при ошибке ffmpeg прежнее.
+    """
     cmd = as_source(video).cmd("ffmpeg", ["-hide_banner", "-loglevel", "error", "-nostdin", "-i", "{}",
                                           "-vf", f"fps={p.fps},scale={p.width}:{p.height}:flags=area,format=gray",
                                           "-f", "rawvideo", "-pix_fmt", "gray", "-"], compress=True)
-    r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if r.returncode:
-        sys.exit(f"ffmpeg: {r.stderr.decode(errors='replace')[-400:]}")
-    buf = np.frombuffer(r.stdout, dtype=np.uint8)
-    n = len(buf) // (p.width * p.height)
-    return buf[: n * p.width * p.height].reshape(n, p.height, p.width)
+    one = p.width * p.height
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    raw = bytearray()
+    last = 0.0
+    while True:
+        chunk = proc.stdout.read(one * 16) if proc.stdout else b""
+        if not chunk:
+            break
+        raw += chunk
+        now = time.monotonic()
+        if PROGRESS and now - last > 2:
+            last = now
+            progress(scan=1, sec=round(len(raw) // one / p.fps, 1), total=round(total, 1))
+    err = proc.stderr.read() if proc.stderr else b""
+    if proc.wait():
+        sys.exit(f"ffmpeg: {err.decode(errors='replace')[-400:]}")
+    progress(scan=1, sec=round(len(raw) // one / p.fps, 1), total=round(total, 1))
+    buf = np.frombuffer(memoryview(raw), dtype=np.uint8)
+    n = len(buf) // one
+    return buf[: n * one].reshape(n, p.height, p.width)
 
 
 # --- маска и активность ---------------------------------------------------------------------
@@ -397,7 +430,7 @@ def save_frames_remote(src: Source, items: list[tuple[float, str]], frames_dir: 
 def analyze(video: Path, p: Params, log=print) -> tuple[dict, np.ndarray, tuple]:
     info = probe(video)
     t0 = time.time()
-    frames = extract_frames(video, p)
+    frames = extract_frames(video, p, total=float(info.get("duration") or 0.0))
     t_dec = time.time() - t0
     log(f"кадров {len(frames)} ({len(frames) / p.fps / 60:.0f} мин) за {t_dec:.1f} с "
         f"— {len(frames) / p.fps / max(t_dec, 1e-6):.0f}× реального времени, {info['codec']} "
