@@ -323,7 +323,11 @@ class Handler(BaseHTTPRequestHandler):
                         "site": cached("site", 30.0, site_state),
                         "videos": [] if running else cached("videos", 5.0, videos),
                         "llm": cached("llm", 30.0, llm_state),
-                        "home": str(upload.HOME), "ext": list(upload.VIDEO_EXT)})
+                        "home": str(upload.HOME), "ext": list(upload.VIDEO_EXT),
+                        # ⚠️ Файл стека — в состоянии видно, из какого именно читаются ключи.
+                        # Живьём приложение смотрело НЕ В ТОТ файл, и человек видел только «401».
+                        "stack_env": {"path": str(upload.stack_env_path()),
+                                      "ok": upload.stack_env_path().is_file()}})
             return
         if url.path == "/api/frame":
             # ⚠️ Кадры отдаём ТОЛЬКО из рабочей папки и только картинки: сервер слушает петлю,

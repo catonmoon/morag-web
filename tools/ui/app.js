@@ -305,6 +305,8 @@ function renderParts(s) {
     row("LLM-шлюз", s.llm?.via_site ? "ok" : (s.llm?.ready ? "ok" : "bad"),
         (stack.llm ? `модель ${stack.llm}` : "")
         + (s.llm?.via_site ? " · через сайт" : s.llm?.ready ? " · напрямую" : "некуда ходить: войдите на сайт")),
+    row("файл стека", s.stack_env?.ok ? "ok" : "bad",
+        (s.stack_env?.path || "") + (s.stack_env?.ok ? "" : " — нет файла, ключей негде взять")),
     row("сайт", site.error ? "bad" : (site.logged ? "ok" : "off"),
         site.error ? site.error
           : `${site.site || "не выбран"}${site.who ? ` — ${site.who}` : " — не вошли"}`),

@@ -210,6 +210,8 @@ def test_the_audio_outlives_transcription_so_voiceprints_can_be_taken(env, monke
     """
     fake, video, tmp = env
     upload.save_session("https://site.example.org", {"morag_session": "abc"})
+    # Шаг требует ключа к CAM++ и без него честно не начинается — значит, в тесте он нужен тоже.
+    upload.set_stack_env(ASR_CAMPP_KEY="k")
 
     sys.path.insert(0, str(REPO / "tools"))
     import voiceprints
@@ -288,3 +290,15 @@ def test_speakers_come_from_who_actually_spoke(tmp_path, monkeypatch):
     _, _, speakers = upload.auto_fields(artifact, "https://site", {}, title="T", event="Есть",
                                         tags=["есть"], speakers=[], voices=voices)
     assert speakers == ["Мария Кузнецова", "Нина Ковалёва"], speakers
+
+
+def test_emit_survives_a_field_named_like_its_own_argument():
+    """⚠️⚠️ У кадра экрана поле зовётся `kind` — как и первый аргумент `emit`. Живьём это
+    уронило прогон на первом же описанном кадре (25.09): «got multiple values for argument».
+    Третий случай одного и того же класса после `event` и `i` — поэтому закреплено тестом.
+    """
+    upload.EVENTS.clear()
+    upload.emit("screen.frame", kind="slide", title="Очереди", i=3)
+    evt = upload.EVENTS[-1]
+    assert evt["t"] == "screen.frame" and evt["kind"] == "slide" and evt["i"] == 3
+    upload.EVENTS.clear()
