@@ -280,9 +280,13 @@ export async function renderReader(id, sec = 0, {
   const fieldsForm = editing
     ? el("div", { class: "rd-fields", hidden: "" },
         ...fieldRows.map(([key, label, kind]) => {
+          // ⚠️ Рубрика приезжает под именем `group`: имя поля шапки задаётся конфигом
+          // (`group_by`), и сайт отдаёт его общим именем. Без этого поле выглядело пустым у
+          // записи, у которой рубрика есть.
+          const raw = key === "event" ? meta.group : meta[key];
           const value = key === "tags" || key === "topics" || key === "speakers" || key === "participants"
-            ? (meta[key] || []).join(", ")
-            : (meta[key] || (key === "summary" ? meta.blurb : "") || "");
+            ? (raw || []).join(", ")
+            : (raw || (key === "summary" ? meta.blurb : "") || "");
           const input = kind === "area"
             ? el("textarea", { rows: "3" })
             : el("input", { type: kind === "date" ? "date" : "text" });
