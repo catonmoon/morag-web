@@ -73,6 +73,10 @@ class Fake:
 def env(tmp_path, monkeypatch):
     fake = Fake()
     monkeypatch.setattr(upload, "TRANSPORT", httpx.MockTransport(fake.handle))
+    # ⚠️⚠️ Файл стека ТОЖЕ в песочницу: тест пишет в него ключи, и без этой строки он
+    # правил бы НАСТОЯЩИЙ `~/.asr-stack.env` разработчика — и приложение потом читало бы
+    # тестовый ключ и получало 401 (ловилось 25.09).
+    monkeypatch.setenv("ASR_STACK_ENV", str(tmp_path / "stack.env"))
     monkeypatch.setattr(upload, "HOME", tmp_path / "work")
     monkeypatch.setattr(upload, "SESSION", tmp_path / "session.json")
     monkeypatch.setattr(upload, "POLL_SEC", 0)
