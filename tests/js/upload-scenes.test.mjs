@@ -244,7 +244,12 @@ const { screenScene } = await import(join(repo, "tools/ui/screen.js"));
   assert.equal(scene.state().mode, "draft");
   assert.match(scene.state().text, /эйр флоу/, "черновик виден сразу после пасса-1");
 
+  // Черновик ложится РАЗОМ (не по кадрам) — пачка из сотни окон приходит за сотые секунды.
+  assert.ok(scene.state().text.includes("всё в кафка"), "черновик готов сразу, без кадров");
+
   scene.apply({ t: "stage.start", stage: "pass2" });
+  // …и после пачки фокус возвращается в НАЧАЛО: чистовой проход пойдёт сверху.
+  assert.equal(root.children[1].scrollTop, 0, "после черновика окно стоит в начале");
   scene.apply({ t: "chunk.start", i: 1, n: 2, from: 0, to: 30, spk: "SPEAKER_00" });
   scene.apply({ t: "chunk.done", i: 1, raw: "Мы берём Airflow и ставим его в работу." });
   flush();
@@ -254,6 +259,17 @@ const { screenScene } = await import(join(repo, "tools/ui/screen.js"));
   assert.match(after, /всё в кафка/, "соседнее окно не тронуто");
   assert.equal(scene.state().speakers, 1, "смена голоса отмечена меткой");
   assert.match(after, /SPEAKER_00/, "и метка подписана");
+
+  // ⚠️⚠️ ВТОРОЙ кусок того же чернового окна дописывается В НЕГО. Окно черновика — 30 с,
+  // кусков пасса-2 на него два (живьём 243 на 119), и пока окно «занималось» первым, второй
+  // уезжал в КОНЕЦ текста вместе со своей меткой говорящего — именно так «пропадали подписи».
+  scene.apply({ t: "chunk.start", i: 2, n: 3, from: 15, to: 30, spk: "SPEAKER_01" });
+  scene.apply({ t: "chunk.done", i: 2, raw: "И сразу же второй кусок." });
+  flush();
+  const both = scene.state().text;
+  assert.ok(both.indexOf("второй кусок") < both.indexOf("всё в кафка"),
+            "второй кусок встал в своё окно, а не в конец текста");
+  assert.equal(scene.state().speakers, 2, "смена голоса внутри окна тоже отмечена");
 
   // Имена пришли с сайта — подписи переписываются на месте, без пересборки текста.
   scene.apply({ t: "voices.named", by_label: { SPEAKER_00: { voice: "Speaker_7", name: "Мария Кузнецова" } } });

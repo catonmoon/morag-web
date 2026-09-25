@@ -63,7 +63,11 @@ FOLDERS = [Path.home() / "Downloads", Path.home() / "Desktop", Path.home() / "Mo
 DEPTH = 2
 LIMIT = 60
 
-STATE: dict = {"stage": "idle", "id": "", "error": "", "url": "", "started": 0.0, "finished": 0.0}
+# `send` — галочка «загрузить после расшифровки»: стоит по умолчанию и снимается ПО ХОДУ
+# работы (владелец, 25.09) — человек увидел расшифровку и передумал. `fields` храним, чтобы
+# отправить позже тем же прогоном: он возобновляемый и всё считанное пересчитывать не станет.
+STATE: dict = {"stage": "idle", "id": "", "error": "", "url": "", "started": 0.0, "finished": 0.0,
+               "send": True, "sent": False, "fields": {}}
 LOCK = threading.Lock()
 
 
@@ -211,8 +215,11 @@ def by_path(raw: str) -> dict:
     if path.suffix.lower().lstrip(".") not in upload.VIDEO_EXT:
         raise upload.Step(f"не видео: нужен {', '.join(sorted(upload.VIDEO_EXT))}")
     st = path.stat()
+    # ⚠️ Дата съёмки из МЕТАДАННЫХ важнее файловой: файл, скачанный из архива, «создан»
+    # сегодня, а в контейнере лежит настоящее время встречи. `ffprobe` зовём только для ВЫБРАННОГО
+    # файла, а не для всего списка папок: там его цена умножится на число файлов.
     return {"path": str(path), "name": path.name, "size": st.st_size, "mtime": st.st_mtime,
-            "created": created_at(st), "folder": path.parent.name}
+            "created": created_at(st), "shot": upload.shot_at(path), "folder": path.parent.name}
 
 
 def start(fields: dict) -> dict:
@@ -228,7 +235,8 @@ def start(fields: dict) -> dict:
         # готовой расшифровке (`upload.auto_fields`), из списка самого сайта. Заставлять человека
         # выбирать до прогона было нечестно: о чём запись, толком знает только расшифровка.
         STATE.update({"stage": "running", "id": checked["id"], "error": "", "url": "",
-                      "started": time.time(), "finished": 0.0})
+                      "started": time.time(), "finished": 0.0, "sent": False,
+                      "send": bool(fields.get("send", True)), "fields": dict(fields)})
         upload.LOG.clear()
 
     def work() -> None:
@@ -240,10 +248,13 @@ def start(fields: dict) -> dict:
                 tags=[t.strip() for t in (fields.get("tags") or "").split(",") if t.strip()],
                 summary=fields.get("summary") or "", slides=fields.get("slides") or None,
                 with_stack=bool(fields.get("stack", True)), with_screen=not fields.get("no_screen"),
-                wait=True, title_auto=bool(fields.get("title_auto")))
+                wait=True, title_auto=bool(fields.get("title_auto")),
+                should_upload=lambda: bool(STATE.get("send", True)))
             site, _ = upload.load_session(None)
+            sent = bool(STATE.get("send", True))
             STATE.update({"stage": "done", "finished": time.time(), "search": upload.LAST_SEARCH,
-                          "url": f"{site}/{fields.get('slug', '')}".rstrip("/")})
+                          "sent": sent,
+                          "url": f"{site}/{fields.get('slug', '')}".rstrip("/") if sent else ""})
         except upload.Step as error:
             STATE.update({"stage": "error", "error": str(error), "finished": time.time()})
             upload.say(f"⚠️ {error}")
@@ -316,6 +327,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if url.path == "/api/state":
             running = STATE.get("stage") == "running"
+
             self._json({"job": dict(STATE), "log": upload.LOG[-200:],
                         # ⚠️ Отдаём health ЦЕЛИКОМ, а не «да/нет»: в настройках человек должен видеть,
                         # КТО именно не отвечает — живьём стек выглядел поднятым, а диаризатор не стартовал.
@@ -397,6 +409,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if url.path == "/api/file":
                 self._json(by_path(str(body.get("path") or "")))
+                return
+            if url.path == "/api/send":
+                # Передумали по ходу — меняем флаг; работа спросит его ПЕРЕД отправкой.
+                STATE["send"] = bool(body.get("on", True))
+                # Работа уже кончилась без отправки, а теперь просят отправить — запускаем тот же
+                # прогон: он возобновляемый и дойдёт сразу до загрузки.
+                if STATE["send"] and STATE.get("stage") == "done" and not STATE.get("sent"):
+                    self._json(start({**(STATE.get("fields") or {}), "send": True}))
+                    return
+                self._json({"ok": True, "send": STATE["send"]})
                 return
             if url.path == "/api/start":
                 self._json(start(body))

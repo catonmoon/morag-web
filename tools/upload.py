@@ -581,6 +581,22 @@ def local_record(work: Path, artifact: Path, rid: str, title: str, date: str) ->
     return record
 
 
+def shot_at(video: Path) -> str:
+    """Когда запись СНЯТА — по метаданным самого файла, `YYYY-MM-DD` или пусто.
+
+    ⚠️ Дата файла для этого плоха: скачали из архива — и «создан» сегодня. А Teams, Zoom и камеры
+    кладут в контейнер настоящее время съёмки. Пусто — зовущий решает сам, что брать дальше.
+    """
+    try:
+        done = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format_tags=creation_time",
+                               "-of", "default=nw=1:nk=1", str(video)],
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    raw = (done.stdout or "").strip()[:10]
+    return raw if len(raw) == 10 and raw[4] == "-" and raw[7] == "-" and raw[:4].isdigit() else ""
+
+
 def has_video_stream(video: Path) -> bool:
     """Есть ли в файле картинка вообще.
 
@@ -765,7 +781,7 @@ def check_fields(video: Path, title: str, date: str, slides: str | None) -> dict
 def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: list[str] | None = None,
              tags: list[str] | None = None, summary: str = "", slides: str | None = None,
              site: str | None = None, with_stack: bool = False, with_screen: bool = True,
-             wait: bool = True, title_auto: bool = False) -> str:
+             wait: bool = True, title_auto: bool = False, should_upload=None) -> str:
     """Весь путь записи: расшифровка → экран → пакет на сайт. Общий для командной строки и для
     страницы (`upload_ui.py`) — шаги, возобновление и сообщения обязаны быть одни и те же."""
     video = Path(video).expanduser().resolve()
@@ -818,6 +834,13 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
         files.append(("slides.zip", work / "slides.zip"))
     if slides_pdf:
         files.append(("slides.pdf", slides_pdf))
+    # ⚠️ Спрашиваем ПЕРЕД ОТПРАВКОЙ, а не на старте: галочку «загрузить после расшифровки»
+    # можно снять ПО ХОДУ работы (владелец, 25.09) — человек увидел расшифровку и передумал.
+    # Пакет при этом собран и лежит в рабочей папке: отправить позже — тот же шаг, без пересчёта.
+    if should_upload is not None and not should_upload():
+        say("на сайт не отправляю — галочка снята; пакет готов в " + str(work))
+        emit("client.step", step="held", say="готово, но не отправлено")
+        return ""
     rid = upload(work, site_url, cookies, manifest, files, video, wait=wait)
     # Звук держим до этого места: до принятия пакета он может понадобиться — отпечаткам голосов,
     # шкале волны в окне и возобновлённому прогону (иначе ffmpeg снова полезет в гигабайтное

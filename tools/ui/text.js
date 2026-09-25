@@ -56,6 +56,7 @@ export function textScene(root) {
   let badges = [];           // поставленные метки говорящего: их переписываем, когда придут имена
   let lastSpk = null;        // кто говорил в предыдущем куске
   let chunk = null;          // текущий кусок пасса-2: {from, to, spk}
+  let toTop = false;         // пришёл черновик — после пачки вернуть фокус в начало
   let pending = "";          // что печатается сейчас
   let typed = 0;
   let marks = [];            // узлы уже поставленной корректуры — их не трогаем
@@ -142,6 +143,18 @@ export function textScene(root) {
   // --- текст пишется ---------------------------------------------------------------------
 
   function append(sec, raw, { draft = false, to = 0 } = {}) {
+    // ⚠️ Черновик приходит ПАЧКОЙ (замерено на живой записи: 119 окон за 0.04 с) — печатать
+    // его по кадрам незачем: получается долгая рябь вместо текста, и фокус уезжает в конец, а
+    // чистовой проход начнётся сначала (решение владельца 25.09).
+    if (draft) {
+      finishTyping();
+      const piece = el("span", { class: "tx-piece tx-draft", text: `${(raw || "").trim()} ` });
+      piece.at = sec;
+      piece.till = to || sec;
+      body.append(piece);
+      anchors.push([sec, piece]);
+      return piece;
+    }
     // ⚠️ Прежний кусок дописываем ЦЕЛИКОМ, а не по напечатанному: иначе при быстром потоке
     // (или перемотке на стенде) каждый новый кусок обрезал бы предыдущий на полуслове, и от
     // текста оставались бы огрызки. Печать — это скорость показа, а не содержимое.
@@ -172,7 +185,7 @@ export function textScene(root) {
    * ⚠️ Метка БЛОЧНАЯ — сама переносит строку. Перестраивать уже разложенный черновик в абзацы
    * задним числом нельзя: он лежит сплошным потоком, и перекладка сбила бы прокрутку.
    */
-  function badge(spk, before) {
+  function badge(spk, before, { into = null } = {}) {
     if (!spk || spk === lastSpk) return null;
     lastSpk = spk;
     const idx = Math.max(0, speakers.indexOf(spk));
@@ -180,7 +193,8 @@ export function textScene(root) {
       el("i", { style: `background:${colour(idx)}` }), who(spk));
     mark.spk = spk;
     badges.push(mark);
-    if (before && before.parentElement) before.parentElement.insertBefore(mark, before);
+    if (into) into.append(mark);
+    else if (before && before.parentElement) before.parentElement.insertBefore(mark, before);
     else body.append(mark);
     return mark;
   }
@@ -229,18 +243,29 @@ export function textScene(root) {
    * ⚠️ Забираем кусок СРАЗУ (`taken`), а не в момент подмены: между постановкой в очередь и
    * заменой проходит доля секунды, и соседний чанк успел бы выбрать тот же черновик.
    */
-  /** Остались ли непотраченные черновые куски. */
+  /** Остались ли черновые куски (хоть один незаменённый). */
   function drafts() {
-    for (const node of body.children) if (node.classList.contains("tx-draft") && !node.taken) return true;
+    for (const node of body.children) if (node.classList.contains("tx-draft")) return true;
     return false;
   }
 
-  function draftAt(sec) {
+  /** Окно черновика, в которое попадает эта секунда.
+   *
+   * ⚠️⚠️ Окно НЕ ЗАНИМАЕТСЯ первым же куском. Черновое окно — 30 секунд, а кусков пасса-2
+   * на него приходится ДВА (замерено на живой записи: 243 куска на 119 окон). Когда окно
+   * занималось, второй кусок не находил себе места и дописывался В КОНЕЦ текста — вместе со
+   * своей меткой говорящего. Снаружи это выглядело как «подписей спикеров нет» (они были внизу, за
+   * сотней кусков черновика) и «чистовик идёт не сначала».
+   */
+  function windowAt(sec) {
+    let last = null;
     for (const node of body.children) {
-      if (!node.classList.contains("tx-draft") || node.taken) continue;
-      if (sec + 0.5 >= (node.at || 0) && sec - 0.5 <= (node.till || 0)) { node.taken = true; return node; }
+      if (!node.classList.contains("tx-piece")) continue;
+      if (node.at == null) continue;
+      if (sec + 0.5 >= node.at && sec - 0.5 <= (node.till ?? node.at)) return node;
+      if (node.at <= sec) last = node;
     }
-    return null;
+    return last && last.classList.contains("tx-draft") ? last : null;
   }
 
   function runJob(job, now) {
@@ -256,23 +281,32 @@ export function textScene(root) {
   function runChunk(job, now) {
     finishTyping();
     const { hold, gap } = pace(jobs.length);
-    const spot = draftAt(job.from);
+    const spot = windowAt(job.from);
     if (!spot) {                       // черновика нет (окно открыли позже) — просто дописываем
       badge(job.spk, null);
       append(job.from, job.raw, { to: job.to });
       busy = now + gap;
       return;
     }
-    badge(job.spk, spot);
+    const fresh = spot.classList.contains("tx-draft");
+    if (fresh) badge(job.spk, spot);   // метка перед куском — когда кусок только начинается
     spot.classList.add("tx-hit");
     follow(spot);
     busy = now + hold + gap;
     const land = () => {
       spot.classList.remove("tx-hit");
-      spot.classList.remove("tx-draft");
-      spot.textContent = `${(job.raw || "").trim()} `;
-      spot.at = job.from;
-      spot.till = job.to;
+      const text = `${(job.raw || "").trim()} `;
+      if (fresh) {
+        spot.classList.remove("tx-draft");
+        spot.textContent = text;
+      } else {
+        // Второй кусок того же окна: дописываем В НЕГО, а не в конец текста; метка
+        // говорящего тоже встаёт внутрь — голос сменился серединой окна, а не перед ним.
+        const mark = badge(job.spk, null, { into: spot });
+        if (!mark) spot.append(document.createTextNode(text));
+        else spot.append(document.createTextNode(text));
+      }
+      spot.till = job.to || spot.till;
     };
     if (reduced()) land(); else setTimeout(land, hold);
   }
@@ -347,6 +381,9 @@ export function textScene(root) {
 
   return {
     apply(e) {
+      // ⚠️ Пачка черновика кончилась — ставим фокус В НАЧАЛО: чистовой проход пойдёт
+      // сверху вниз, и человек должен видеть его начало, а не конец черновика.
+      if (toTop && e.t !== "draft.window") { body.scrollTop = 0; toTop = false; }
       if (e.t === "diar.spans") { speakers = e.speakers || []; return; }
       // ⚠️ Черновик приходит ПАЧКОЙ в конце пасса-1 (whisper слушает файл одним вызовом),
       // и это не недоработка показа, а устройство модели. Зато уже к третьей минуте в окне лежит
@@ -361,6 +398,7 @@ export function textScene(root) {
         root.removeAttribute("hidden");
         if (mode === "idle") mode = "draft";
         append(e.from || 0, e.text || "", { draft: true, to: e.to || 0 });
+        toTop = true;
         return;
       }
       if (e.t === "stage.start" && e.stage === "pass2") {
@@ -412,7 +450,7 @@ export function textScene(root) {
     },
     reset() {
       mode = "idle"; pending = ""; typed = 0; tail = null; jobs.length = 0; busy = 0;
-      speakers = []; named = {}; badges = []; lastSpk = null; chunk = null;
+      speakers = []; named = {}; badges = []; lastSpk = null; chunk = null; toTop = false;
       applied = dropped = turns = current = 0;
       marks = []; anchors = [];
       head.textContent = ""; body.replaceChildren(); count.textContent = "";

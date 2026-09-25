@@ -306,3 +306,43 @@ def test_emit_survives_a_field_named_like_its_own_argument():
     evt = upload.EVENTS[-1]
     assert evt["t"] == "screen.frame" and evt["kind"] == "slide" and evt["i"] == 3
     upload.EVENTS.clear()
+
+
+def test_the_package_waits_when_the_person_unchecks_sending(env, monkeypatch):
+    """⚠️ Галочка «загрузить после расшифровки» спрашивается ПЕРЕД ОТПРАВКОЙ, а не на старте:
+    её снимают по ходу, увидев расшифровку (решение владельца 25.09). Пакет при этом собран
+    и лежит в рабочей папке — отправить позже стоит одного повторного прогона, без пересчёта.
+    """
+    fake, video, tmp = env
+    upload.save_session("https://site.example.org", {"morag_session": "abc"})
+    rid = upload.pipeline(video, title="Норм", date="2026-03-12", event="Доклады",
+                          with_screen=False, wait=False, should_upload=lambda: False)
+    assert rid == "" and not fake.manifests, "манифест на сайт не уехал"
+    assert (upload.HOME / "2026-03-12-norm" / "artifact.json").is_file(), "а расшифровка на месте"
+    # Передумали — тот же прогон довозит пакет, ничего не считая заново.
+    was = fake.transcriptions
+    upload.pipeline(video, title="Норм", date="2026-03-12", event="Доклады",
+                    with_screen=False, wait=False, should_upload=lambda: True)
+    assert fake.manifests, "со второго раза уехал"
+    assert fake.transcriptions == was, "и расшифровка заново не гонялась"
+
+
+def test_the_date_comes_from_the_video_not_from_the_file(monkeypatch, tmp_path):
+    """⚠️ Файл, скачанный из архива, «создан» сегодня — и дата выступления оказывалась датой
+    загрузки. Teams, Zoom и камеры кладут время съёмки в контейнер — спрашиваем его."""
+    import subprocess as sp
+
+    class Done:
+        def __init__(self, out): self.stdout = out
+
+    monkeypatch.setattr(upload.subprocess, "run", lambda *a, **k: Done("2025-11-14T09:02:13.000000Z\n"))
+    assert upload.shot_at(tmp_path / "talk.mp4") == "2025-11-14"
+    monkeypatch.setattr(upload.subprocess, "run", lambda *a, **k: Done("\n"))
+    assert upload.shot_at(tmp_path / "talk.mp4") == "", "нет метки — не выдумываем"
+
+    def boom(*a, **k):
+        raise OSError("нет ffprobe")
+
+    monkeypatch.setattr(upload.subprocess, "run", boom)
+    assert upload.shot_at(tmp_path / "talk.mp4") == "", "и не падаем без ffprobe"
+    _ = sp

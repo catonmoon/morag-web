@@ -116,6 +116,9 @@ function pick(v) {
   if (!id("date").value) {
     // ⚠️ Дата СОЗДАНИЯ файла, а не последнего изменения: копирование или конвертация
     // сдвигают `mtime` на сегодня, и дата выступления оказывалась датой загрузки.
+    // ⚠️ Сначала дата СЪЁМКИ из метаданных видео, потом уже дата файла: файл, скачанный
+    // из архива, «создан» сегодня, а в контейнере лежит настоящее время встречи.
+    if (v.shot) { id("date").value = v.shot; return; }
     const t = v.created || v.mtime;
     id("date").value = (t ? new Date(t * 1000) : new Date()).toISOString().slice(0, 10);
   }
@@ -162,7 +165,7 @@ function resetDrop() {
 function renderRecent(list) {
   videos = list;
   id("recent").replaceChildren(...list.slice(0, 8).map((v) =>
-    el("button", { onclick: () => pick(v) },
+    el("button", { onclick: () => takePath(v.path) },
        el("b", { text: v.name }),
        el("i", { text: `${v.folder} · ${size(v.size)} · ${when(v.mtime)}` }))));
 }
@@ -265,7 +268,15 @@ async function tick() {
     id("work-msg").textContent = "";
     id("work").hidden = false;
     id("form").hidden = false;
+  } else if (job.stage === "done" && job.sent === false) {
+    // Передумали по ходу — говорим прямо, где лежит готовое и как отправить.
+    id("ready-msg").textContent = "Расшифровка готова, на сайт не отправлял — галочка была снята. "
+      + `Пакет лежит в ${s.home}/${job.id}.`;
+    id("send-now").hidden = false;
+    id("open-record").hidden = true;
   } else if (job.stage === "done") {
+    id("send-now").hidden = true;
+    id("open-record").hidden = false;
     id("ready-msg").textContent = "Расшифровка, слайды и поля уже на сайте — запись читается и играет. "
       + (job.search === "later" ? "В поиске она появится после ближайшей плановой индексации. " : "")
       + "Голоса подписываются там же, в режиме правки.";
@@ -326,6 +337,19 @@ id("do-login").onclick = async () => {
   } catch (e) { id("login-msg").textContent = e.message; id("login-msg").className = "msg bad"; }
 };
 
+// Галочка работает и ДО старта, и ПО ХОДУ: сервер спросит флаг перед самой отправкой.
+id("send").onchange = async () => {
+  try { await api("/api/send", { on: id("send").checked }); }
+  catch (e) { id("work-msg").textContent = e.message; }
+};
+
+id("send-now").onclick = async () => {
+  id("send-now").disabled = true;
+  try { await api("/api/send", { on: true }); await tick(); }
+  catch (e) { id("ready-msg").textContent = e.message; }
+  id("send-now").disabled = false;
+};
+
 id("go").onclick = async () => {
   id("msg").textContent = "";
   id("msg").className = "msg";
@@ -333,6 +357,7 @@ id("go").onclick = async () => {
   try {
     await api("/api/start", {
       video: picked.path, title: id("title").value.trim(), date: id("date").value,
+      send: id("send").checked,
       event: id("event").value, speakers: id("speakers").value, tags: id("tags").value,
       summary: id("summary").value, slides: id("slides").value.trim(), stack: true, title_auto: !titleTouched,
     });
