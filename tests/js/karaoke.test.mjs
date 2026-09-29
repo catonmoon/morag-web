@@ -58,7 +58,12 @@ class El {
     this.kids = [];
     this.append(...kids);
   }
-  focus() {}
+  focus() {
+    this._on?.focus?.({});
+  }
+  blur() {
+    this._on?.blur?.({});
+  }
   click() {
     this._on?.click?.({ stopPropagation() {} });
   }
@@ -469,12 +474,27 @@ const ed = buildKaraoke(TURNS, {
 });
 const edWords = words(ed);
 const lines = turnsOf(ed);
-const buttonOf = (line) => line.querySelector(".kar-edit");
 const bodyOf = (line) => line.kids.find((k) => k instanceof El && k.classList.contains("kar-text"));
+const wordsIn = (line) => bodyOf(line).kids.filter((k) => k instanceof El);
+// Набор в абзаце так, как его видит караоке: фокус → браузер переписал узлы → уход из абзаца.
+// Узлы переписываем НАРОЧНО криво — весь текст в первом слове, — как это и делает браузер,
+// когда сливает соседние узлы при правке.
+const type = (line, text) => {
+  const body = bodyOf(line);
+  body.focus();
+  const first = wordsIn(line)[0];
+  first.textContent = text;
+  body.kids = [first];
+};
+const key = (line, k) => bodyOf(line)._on.keydown({ key: k, preventDefault() {} });
 
 check("вне режима клик по слову перематывает", () => {
   edWords[0]._on.click({ stopPropagation() {} });
   assert.deepEqual(jumps, [0], "перемотка по слову — смысл читалки, её трогать нельзя");
+});
+
+check("вне режима абзац не редактируется", () => {
+  assert.equal(bodyOf(lines[0]).attrs.contenteditable, undefined);
 });
 
 check("в режиме клик по слову ТОЖЕ перематывает", () => {
@@ -490,20 +510,25 @@ check("в режиме подсветка по времени идёт как о
   assert.ok(ed.at(3.5), "подсветка в режиме правки погасла");
 });
 
-check("у каждой реплики есть кнопка правки", () => {
-  assert.ok(buttonOf(lines[0]) && buttonOf(lines[1]), "кнопка правки не у всех реплик");
+check("в режиме каждый абзац правится на месте, без кнопки и поля", () => {
+  // Владелец, 29.09: кнопка «Редактировать» стояла в углу абзаца и за ней приходилось листать,
+  // а поле ввода сбивало разметку. Щелчок в текст — и правишь.
+  for (const line of lines) {
+    assert.ok(bodyOf(line).attrs.contenteditable, "абзац не редактируется на месте");
+    assert.equal(line.querySelector(".kar-edit"), null, "кнопка «Редактировать» вернулась");
+  }
 });
 
 check("нетронутые слова остаются СВОИМИ узлами и своим временем", () => {
   // Иначе поиск звучащего слова остался бы с висящими узлами, и в правленом абзаце умерли бы
   // и подсветка, и перемотка — ровно там, где человек только что работал.
   const line = lines[0];
-  const before = line.querySelector(".kar-text").kids.filter((k) => k instanceof El);
-  buttonOf(line).click();
-  line.querySelector(".kar-area").value = "раз ДВА три";
-  line.querySelector(".kar-ok").click();
-  const after = line.querySelector(".kar-text").kids.filter((k) => k instanceof El);
+  const before = wordsIn(line);
+  type(line, "раз ДВА три");
+  bodyOf(line).blur();
+  const after = wordsIn(line);
   assert.equal(after[0], before[0], "«раз» перерисовали зря — его правка не касалась");
+  assert.equal(after[0].textContent, "раз", "узел слова остался с набранным в него чужим текстом");
   assert.equal(after[2], before[2], "«три» перерисовали зря");
   assert.ok(after[1].classList.contains("kar-fresh"), "новое слово не помечено");
   jumps.length = 0;
@@ -516,10 +541,9 @@ check("нетронутые слова остаются СВОИМИ узлам�
 
 check("вставленное слово получает паузу между соседями и кликается", () => {
   const line = lines[1];
-  buttonOf(line).click();
-  line.querySelector(".kar-area").value = "четыре и пять";
-  line.querySelector(".kar-ok").click();
-  const kids = line.querySelector(".kar-text").kids.filter((k) => k instanceof El);
+  type(line, "четыре и пять");
+  bodyOf(line).blur();
+  const kids = wordsIn(line);
   jumps.length = 0;
   kids[1]._on.click({ stopPropagation() {} });
   assert.equal(jumps.length, 1, "вставленное слово не перематывает");
@@ -527,32 +551,64 @@ check("вставленное слово получает паузу между 
   done.length = 0;
 });
 
-check("правка реплики целиком отдаётся как «было → стало»", () => {
+check("правка реплики целиком отдаётся как «было → стало» при уходе из абзаца", () => {
   const line = lines[0];
-  buttonOf(line).click();
-  const area = line.querySelector("kar-area") || line.querySelector(".kar-area");
-  assert.ok(area, "поле правки не открылось");
-  area.value = "раз ДВА три четыре";
-  line.querySelector(".kar-ok").click();
+  type(line, "раз  ДВА три четыре ");
+  assert.equal(done.length, 0, "правка ушла раньше, чем человек покинул абзац");
+  bodyOf(line).blur();
   assert.deepEqual(done, [[0, "раз ДВА три", "раз ДВА три четыре"]]);
 });
 
-check("отмена ничего не сохраняет и возвращает текст", () => {
-  const line = lines[1];
-  buttonOf(line).click();
-  line.querySelector(".kar-area").value = "совсем другое";
-  line.querySelector(".kar-no").click();
-  assert.equal(done.length, 1, "«Отмена» записала правку");
-  assert.ok(bodyOf(line), "текст реплики не вернулся на место");
+check("уход из абзаца без изменений ничего не пишет", () => {
+  bodyOf(lines[0]).focus();
+  bodyOf(lines[0]).blur();
+  assert.equal(done.length, 1);
 });
 
-check("выход из режима досохраняет открытое поле", () => {
-  // Выход — жест сохранения. Потерять на нём набранный текст было бы худшим из ответов.
+check("Esc откатывает абзац и ничего не сохраняет", () => {
   const line = lines[1];
-  buttonOf(line).click();
-  line.querySelector(".kar-area").value = "четыре и пять шесть";
-  ed.commitOpen();
+  type(line, "совсем другое");
+  key(line, "Escape");
+  assert.equal(done.length, 1, "Esc записал правку");
+  assert.equal(bodyOf(line).textContent.trim(), "четыре и пять", "текст абзаца не вернулся");
+});
+
+check("Enter применяет правку, а не рождает новый абзац", () => {
+  const line = lines[1];
+  type(line, "четыре и пять шесть");
+  key(line, "Enter");
   assert.deepEqual(done.at(-1), [1, "четыре и пять", "четыре и пять шесть"]);
+});
+
+check("стёртый целиком абзац не применяется", () => {
+  const line = lines[1];
+  const n = done.length;
+  type(line, "   ");
+  bodyOf(line).blur();
+  assert.equal(done.length, n, "пустой абзац ушёл правкой");
+  assert.equal(bodyOf(line).textContent.trim(), "четыре и пять шесть");
+});
+
+check("выход из режима досохраняет абзац с кареткой", () => {
+  // Выход — жест сохранения. Потерять на нём набранный текст было бы худшим из ответов.
+  const line = lines[0];
+  type(line, "раз ДВА три пять");
+  ed.commitOpen();
+  assert.deepEqual(done.at(-1), [0, "раз ДВА три четыре", "раз ДВА три пять"]);
+});
+
+check("«Отменить» бросает набранное в абзаце с кареткой", () => {
+  const line = lines[0];
+  const n = done.length;
+  type(line, "мусор");
+  ed.discardOpen();
+  assert.equal(done.length, n);
+  assert.equal(bodyOf(line).textContent.trim(), "раз ДВА три пять");
+});
+
+check("выключение режима снимает редактирование", () => {
+  ed.setEditing(false);
+  assert.equal(bodyOf(lines[0]).attrs.contenteditable, undefined);
 });
 
 // --- метка говорящего ------------------------------------------------------

@@ -832,7 +832,7 @@ export async function renderReader(id, sec = 0, {
     showEditControls(true);
     fieldsForm?.removeAttribute("hidden");
     karaoke?.setEditing(true);
-    say("Режим правки: у каждой реплики есть «Редактировать». «ОК» сохранит правки, «Отменить» вернёт всё как было.");
+    say("Режим правки: щёлкните в текст и правьте прямо в нём — правка абзаца запоминается, когда уходите из него (Esc — вернуть абзац). «ОК» сохранит всё, «Отменить» вернёт как было.");
   }
 
   async function leaveEdit(save) {
@@ -919,7 +919,7 @@ export async function renderReader(id, sec = 0, {
   prevBtn.addEventListener("click", () => jump(-1));
   nextBtn.addEventListener("click", () => jump(1));
   // ⚠️ Стрелки — только вне полей ввода и без модификаторов (`isSeekKey`): в режиме правки
-  // человек ходит стрелками по тексту в textarea, а Cmd+← в браузере — «назад».
+  // человек ходит стрелками по тексту абзаца, а Cmd+← в браузере — «назад».
   const onArrows = (event) => {
     if (!src) return;
     // Пробел — пауза/пуск, ровно как кнопка «Слушать» (владелец, 13.09); без preventDefault

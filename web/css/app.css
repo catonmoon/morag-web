@@ -843,11 +843,9 @@ body[data-view="chat"] .chat-tools{display:flex}
    абзацы стоят плотно, а шапка с именем появляется только при СМЕНЕ говорящего. */
 /* Колонка времени — НУЛЕВОЙ ширины: время висит в поле слева и текст никуда не двигает.
    Ширина колонки сдвигала бы всю расшифровку вправо, а поле слева и так пустует. */
-/* ⚠️ position:relative обязателен: кнопка «править» (.kar-edit) стоит абсолютом в правом верхнем
-   углу СВОЕГО абзаца. Без него ближайший позиционированный предок — весь блок .kar, и все кнопки
-   абзацев ложились стопкой в его верхний правый угол под липкую шапку имени: клик уходил в шапку
-   («не нажимается») или доставался кнопке ПОСЛЕДНЕГО абзаца, и фокус на textarea утаскивал страницу
-   в конец записи. Поймано владельцем 13.09 на докладе из 79 абзацев. */
+/* position:relative — абзац держит свою систему координат. До 29.09 в его правом верхнем углу
+   абсолютом стояла кнопка «править» (без relative кнопки всех абзацев ложились стопкой в угол
+   блока .kar — ловилось 13.09); теперь правка идёт прямо в тексте, но якорь оставлен. */
 .kar-turn{display:grid;grid-template-columns:0 minmax(0,1fr);align-items:baseline;
   margin:0 0 5px;position:relative;scroll-margin-top:var(--kar-top,64px)}
 .kar-text{grid-column:2}
@@ -998,12 +996,6 @@ body[data-view="chat"] .chat-tools{display:flex}
   color:var(--ink-faint)}
 .rd-editnote[hidden]{display:none}
 
-/* Кнопка у реплики — эфемерная и справа: в режиме она есть у каждой, вне режима её нет. */
-.kar-edit{display:none;position:absolute;top:0;right:0;padding:2px 9px;border-radius:99px;
-  border:1px solid var(--line);background:transparent;color:var(--ink-faint);
-  font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;
-  cursor:pointer;transition:color .15s,border-color .15s}
-.kar-editing .kar-edit{display:inline-block}
 /* «‹‹ ››» — две крошечные плоские кнопки НАД полосой, слева (владелец, 14.09): размером с
    символы, чтобы не отнимать место у полосы — на ней появятся именованные метки. Проявляются
    рамкой только при наведении. */
@@ -1034,21 +1026,14 @@ body[data-view="chat"] .chat-tools{display:flex}
 .dl-btn.rd-ok:hover{background:#27874E;border-color:#27874E;opacity:1}
 .dl-btn.rd-cancel{background:transparent;border-color:#D2453B;color:#D2453B}
 .dl-btn.rd-cancel:hover{background:#D2453B;color:#fff;opacity:1}
-/* В режиме правки освобождаем место под кнопку, чтобы она не легла на слова. */
-.kar-editing .kar-turn{padding-right:130px}
-.kar-edit:hover{color:var(--accent);border-color:var(--accent)}
-
-.kar-editor{margin:2px 0 10px}
-/* Высоту ставит скрипт по содержимому: реплика бывает и в три слова, и в сотню. */
-.kar-area{display:block;width:100%;box-sizing:border-box;min-height:64px;overflow:hidden;padding:10px 12px;
-  border-radius:10px;border:1px solid var(--accent);background:var(--surface);color:var(--ink);
-  font:inherit;line-height:1.6;resize:vertical}
-.kar-editrow{display:flex;gap:8px;margin-top:6px}
-.kar-ok,.kar-no{padding:5px 14px;border-radius:99px;cursor:pointer;font-family:var(--mono);
-  font-size:11px;letter-spacing:.05em;border:1px solid var(--line);background:var(--surface-2);
-  color:var(--ink)}
-.kar-ok{border-color:var(--accent);color:var(--accent)}
-.kar-ok:hover{background:var(--accent-wash)}
+/* Абзац правится ПРЯМО В ТЕКСТЕ (владелец, 29.09): ни поля, ни кнопки, ни отступа под неё —
+   вёрстка в режиме правки та же, что при чтении. Курсор — текстовый, абзац под курсором мыши
+   чуть подсвечен, абзац с кареткой обведён. outline, а не border: рамка не должна сдвигать строки. */
+.kar-editing .kar-text,.kar-editing .kar-text .kar-w{cursor:text}
+.kar-editing .kar-text{border-radius:4px;outline:1px solid transparent;outline-offset:3px;
+  transition:outline-color .15s}
+.kar-editing .kar-text:hover{outline-color:color-mix(in srgb,var(--line) 70%,transparent)}
+.kar-editing .kar-text:focus{outline-color:var(--accent)}
 
 /* Правлено, но ещё не сохранено. Помечаем ТОЛЬКО новые слова: у остальных время измерено и
    осталось прежним, и метить их значило бы врать. */

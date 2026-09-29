@@ -46,7 +46,7 @@ export function buildKaraoke(
   // подсвечиваем, а взгляд наводим на первое выделенное место.
   const spanNodes = [];
 
-  // Режим правки добавляет ровно одно: кнопку «Редактировать» у каждой реплики. Всё остальное
+  // Режим правки добавляет ровно одно: абзацы можно править прямо в тексте. Всё остальное
   // работает как обычно — и перемотка по слову, и подсветка.
   //
   // ⚠️ Сначала я их в этом режиме отключил, и это было неверно: правя реплику, человек первым
@@ -103,7 +103,8 @@ export function buildKaraoke(
     word.addEventListener("click", (event) => {
       event.stopPropagation();
       onSeek?.(timeOf());
-      offerShare(Math.floor(timeOf()), word);
+      // В режиме правки щелчок ставит курсор — плашка «поделиться» легла бы поверх набора.
+      if (!editing) offerShare(Math.floor(timeOf()), word);
     });
   }
 
@@ -164,55 +165,96 @@ export function buildKaraoke(
     passed = -1;
   }
 
-  /** Открыть правку абзаца: поле с его текстом целиком.
+  /** Правка абзаца — ПРЯМО В ТЕКСТЕ, без поля ввода (владелец, 29.09).
    *
-   * Целиком — потому что замена, удаление и вставка это три ИСХОДА одной правки, а не три
-   * разные команды: их различает разница «было/стало», и отдельные кнопки на каждую были бы
-   * сложностью, которой в данных нет.
+   * Было: кнопка «Редактировать» у абзаца подменяла его полем `textarea`. Поле сбивало разметку
+   * (свой шрифт, отступы, перенос строк, ни подсветки, ни слов-ссылок), а кнопка стояла в
+   * верхнем углу абзаца — у длинного монолога за ней приходилось листать вверх. Теперь в режиме
+   * правки сам абзац `contenteditable`: щелчок ставит курсор туда, куда щёлкнули, и ЗАОДНО
+   * перематывает звук на это слово (правило 08.09: правя, хочется переслушать).
+   *
+   * Абзац правится целиком, как и раньше: замена, удаление и вставка — три исхода одной правки,
+   * их различает разница «было/стало». Правка применяется, когда фокус УХОДИТ из абзаца
+   * (решение владельца); Esc — откатить абзац, Enter — применить (новых абзацев не бывает:
+   * абзац — это мереный тайм-код, его не создать нажатием клавиши).
    */
-  function openEditor(i) {
+  let active = -1; // абзац, в котором сейчас курсор
+
+  // Браузер, редактируя, режет и сливает узлы слов как ему удобно, и этим узлам верить нельзя.
+  // Поэтому перед применением правки абзац собирается ЗАНОВО из своих записей — прежние узлы с
+  // прежним текстом, — а уже потом `reflow` перестраивает середину. Иначе узел, в который
+  // впечатали соседнее слово, остался бы «своим» и держал бы чужой текст с чужим временем.
+  function restore(i) {
     const para = paragraphs[i];
-    if (!para || para.open) return;
-    hideShare(); // плашка «поделиться» от прошлого клика по слову висела бы поверх поля
-    const area = el("textarea", { class: "kar-area", rows: "4" });
-    area.value = para.text;
-    const ok = el("button", { class: "kar-ok", text: "Готово" });
-    const no = el("button", { class: "kar-no", text: "Отмена" });
-    const box = el("div", { class: "kar-editor" }, area,
-                   el("div", { class: "kar-editrow" }, ok, no));
-    box.addEventListener("click", (event) => event.stopPropagation());
-    para.open = box;
-    para.body.replaceWith(box);
+    const kids = [];
+    for (const entry of flat.slice(para.from, para.from + para.count)) {
+      entry.node.textContent = entry.text;
+      kids.push(entry.node, " ");
+    }
+    para.body.replaceChildren(...kids);
+  }
 
-    // Поле — ПО РАЗМЕРУ реплики. Замерено глазами на живой записи: реплика в 90 слов в поле
-    // фиксированной высоты показывает четверть себя, да ещё и открывается прокрученной в конец
-    // (курсор ставится в конец текста) — правишь, не видя начала. Растим по содержимому и
-    // ставим курсор в НАЧАЛО.
-    const fit = () => {
-      area.style.height = "auto";
-      area.style.height = `${area.scrollHeight}px`;
-    };
-    fit();
-    area.addEventListener("input", fit);
-    area.focus();
-    area.setSelectionRange?.(0, 0);
-    area.scrollTop = 0;
+  function settle(i, apply) {
+    const para = paragraphs[i];
+    if (!para) return;
+    if (active === i) active = -1;
+    // Пробелы схлопываем: в пословных временах «слово» с пробелом молча отключает разрез на
+    // абзацы, и часовой доклад становится одной простынёй с одним тайм-кодом. Неразрывный
+    // пробел, который браузер ставит при наборе, `\s` тоже ловит.
+    const text = para.body.textContent.replace(/\s+/g, " ").trim();
+    restore(i);
+    // Пустой абзац не применяем: удалить реплику целиком — отдельная задача, а не стёртый текст.
+    if (!apply || !text || text === para.text) return;
+    const was = para.text;
+    reflow(i, text.split(" "));
+    onEdit?.(i, was, text);
+  }
 
-    const close = () => {
-      box.replaceWith(para.body);
-      para.open = null;
-    };
-    no.addEventListener("click", close);
-    ok.addEventListener("click", () => {
-      // Пробелы схлопываем: в пословных временах «слово» с пробелом молча отключает разрез
-      // на абзацы, и часовой доклад становится одной простынёй с одним тайм-кодом.
-      const text = area.value.replace(/\s+/g, " ").trim();
-      close();
-      if (!text || text === para.text) return;
-      const was = para.text;
-      reflow(i, text.split(" "));
-      onEdit?.(i, was, text);
+  function editable(i) {
+    const para = paragraphs[i];
+    const body = para.body;
+    body.addEventListener("focus", () => {
+      if (!editing) return;
+      hideShare(); // плашка «поделиться» висела бы поверх набираемого текста
+      active = i;
     });
+    body.addEventListener("blur", () => {
+      if (active === i) settle(i, true);
+    });
+    body.addEventListener("keydown", (event) => {
+      if (!editing) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        body.blur(); // уход из абзаца и есть «применить»
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        settle(i, false);
+        body.blur();
+      }
+    });
+    // Вставка — только текстом: из буфера иначе приезжают разметка, ссылки и переводы строк.
+    body.addEventListener("paste", (event) => {
+      if (!editing) return;
+      event.preventDefault();
+      const text = (event.clipboardData?.getData("text/plain") || "").replace(/\s+/g, " ");
+      document.execCommand?.("insertText", false, text);
+    });
+  }
+
+  function makeEditable(on) {
+    for (const [i, para] of paragraphs.entries()) {
+      if (on) {
+        // `plaintext-only` не даёт браузеру вставлять жирный, ссылки и `<div>` на месте строк;
+        // где его не знают, остаётся обычное `true`, а вставку текстом держит обработчик выше.
+        para.body.setAttribute("contenteditable", "plaintext-only");
+        if (para.body.contentEditable !== "plaintext-only") para.body.setAttribute("contenteditable", "true");
+        // Проверка орфографии красила бы красным каждый термин и фамилию — это расшифровка, не письмо.
+        para.body.setAttribute("spellcheck", "false");
+      } else {
+        if (active === i) settle(i, true);
+        para.body.removeAttribute("contenteditable");
+      }
+    }
   }
 
   let prevSpeaker = null;
@@ -307,30 +349,17 @@ export function buildKaraoke(
       (box || body).append(word, " ");
       flat.push({ start, end, node: word, text });
     }
-    // Кнопка правки — эфемерная и справа: вне режима её нет вовсе, в режиме она появляется у
-    // каждой реплики. Вешаем ПОСЛЕ тела: ей нужен готовый абзац.
     const words = turn.words || [];
     paragraphs.push({
       body,
       text: words.map((w) => w[0]).join(" "),
-      open: null,
       // Границы абзаца в общем списке слов: по ним перестраивается правленый абзац.
       from: flat.length - words.length,
       count: words.length,
       start: turn.start ?? words[0]?.[1] ?? 0,
       end: turn.end ?? words.at(-1)?.[2] ?? 0,
     });
-    if (onEdit) {
-      const edit = el("button", { class: "kar-edit", text: "Редактировать",
-                                  title: "Править эту реплику целиком" });
-      edit.addEventListener("click", (event) => {
-        event.stopPropagation();
-        openEditor(index);
-      });
-      // Кнопка ложится ПОВЕРХ угла абзаца и места в потоке не занимает: у продолжения речи
-      // шапки больше нет, а править нужно каждый абзац.
-      line.append(edit);
-    }
+    if (onEdit) editable(index);
     line.append(body);
     node.append(line);
     // Промежуток реплики берём из данных, а если их нет — по её же словам.
@@ -447,10 +476,11 @@ export function buildKaraoke(
       hideShare();
       if (onShareAt) document.removeEventListener("click", hideShare);
     },
-    /** Включить или выключить режим правки. */
+    /** Включить или выключить режим правки: абзацы становятся редактируемыми на месте. */
     setEditing(on) {
       editing = !!on;
       node.classList.toggle("kar-editing", editing);
+      if (onEdit) makeEditable(editing);
     },
     /** Переписать метки одного голоса ПРЯМО НА СТРАНИЦЕ.
      *
@@ -464,20 +494,20 @@ export function buildKaraoke(
         met.node.classList.toggle("raw", !name);
       }
     },
-    /** Закрыть открытое поле, ПРИМЕНИВ написанное. Выход из режима — жест сохранения, и
+    /** Применить правку абзаца, в котором курсор. Выход из режима — жест сохранения, и
      * потерять на нём набранный текст было бы худшим из возможных ответов. */
     commitOpen() {
-      for (const para of paragraphs) para.open?.querySelector(".kar-ok")?.click();
+      if (active >= 0) settle(active, true);
     },
-    /** Закрыть открытое поле, НЕ применяя написанное — «Отменить» на пульте. */
+    /** Бросить правку абзаца, в котором курсор, — «Отменить» на пульте. */
     discardOpen() {
-      for (const para of paragraphs) para.open?.querySelector(".kar-no")?.click();
+      if (active >= 0) settle(active, false);
     },
     /** Вернуть абзацу текст (откат черновика по «Отменить»): та же перестройка, что у правки,
      * поэтому нетронутые слова остаются своими узлами, а караоке не теряет место. */
     rewrite(i, text) {
       const para = paragraphs[i];
-      if (para && !para.open && para.text !== text) reflow(i, text.split(" "));
+      if (para && active !== i && para.text !== text) reflow(i, text.split(" "));
     },
     wordAt,
     words: flat.length,
@@ -528,7 +558,7 @@ export function follower(scroller, { pauseMs = 2500, headroom = 0 } = {}) {
   // слову, и карточка с полем ввода уезжала из-под рук — «править спикера, пока идёт запись,
   // нереально». Пауза записи была бы хуже: правя, хочется ПЕРЕСЛУШАТЬ (правило 08.09).
   // Замок счётный (карточка и поле могут быть открыты разом) и дублируется проверкой фокуса:
-  // поле правки абзаца открывает караоке само, ему замок не выдают — хватает фокуса в textarea.
+  // абзац, который правят на месте, замка не берёт — хватает фокуса в нём (`isContentEditable`).
   let locks = 0;
   const typing = () => {
     const doc = globalThis.document;
