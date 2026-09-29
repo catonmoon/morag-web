@@ -150,6 +150,23 @@ function paintMore(records) {
   for (const [block, box] of [["#fb-cats", "#f-cats"], ["#fb-kinds", "#f-kinds"], ["#fb-topics", "#f-topics"], ["#fb-tags", "#f-tags"]]) {
     $(block).hidden = !$(box).childElementCount;
   }
+  alignLetters($("#f-topics"), $("#f-tags"));
+}
+
+/** Меньшая буква — на уровне СЕРЕДИНЫ большей (владелец, 29.09): с тех пор как буква растёт по
+ *  числу слов, «М» и «О» бывают разного размера, и прижатая к верху меньшая смотрелась обрывком.
+ *  Сдвигается само поле буквы, подписи блоков остаются наверху. Только когда буквы стоят в ОДНОМ
+ *  ряду: на узком экране блоки идут друг под другом, и отступ был бы просто дырой. */
+function alignLetters(...boxes) {
+  for (const box of boxes) box.style.marginTop = "";
+  if (!boxes.every((box) => box.classList.contains("lcloud") && !box.closest("[hidden]"))) return;
+  const tops = boxes.map((box) => box.getBoundingClientRect().top);
+  if (Math.abs(tops[0] - tops[1]) > 2) return;
+  const heights = boxes.map((box) => box.offsetHeight);
+  const tallest = Math.max(...heights);
+  boxes.forEach((box, i) => {
+    if (heights[i] < tallest) box.style.marginTop = `${Math.round((tallest - heights[i]) / 2)}px`;
+  });
 }
 
 /** Чипы с множественным выбором: по убыванию частоты (у предметной оси нет «нового» и
