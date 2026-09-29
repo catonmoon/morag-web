@@ -219,46 +219,84 @@ function cloud(box, dimension, counts, { rareHidden = false, onRare = null } = {
 /**
  * Облако в форме БУКВЫ (владелец, 15.09): слова разложены по маске глифа, часть — вертикально
  * и под углом, чтобы заполнились штрихи и буква читалась издалека. Геометрия — в
- * `letter-cloud.js`; здесь только слова, размер поля и кнопки. Ширина поля — по факту (панель
- * уже показана, ширина есть), высота — 0.85 ширины: и «М», и «О» в такой пропорции ложатся.
+ * `letter-cloud.js`; здесь только слова, размер поля и кнопки. Поле квадратное; сторона буквы —
+ * по площади слов (не больше ширины колонки), буква стоит по центру колонки.
  * Слова, которым не нашлось места, не пропадают: они дописываются строкой под буквой.
  */
 function letterCloud(box, dimension, counts, letter, { rareHidden = false, onRare = null } = {}) {
   const width = Math.min(460, Math.max(240, box.clientWidth || 400));
-  // Квадрат. Вытянутое поле с растяжением глифа (1.25 ширины) пробовали 15.09 — владелец:
-  // «некрасиво, давай более квадратные»; место под слова добирается ужиманием кегля ниже.
-  const height = width;
   const root = getComputedStyle(document.documentElement);
   const serif = root.getPropertyValue("--serif").trim() || "Georgia, serif";
   const sans = root.getPropertyValue("--sans").trim() || "system-ui, sans-serif";
-  // Обводка в 10 % ширины поля: штрихи «М» и «О» жирнее самого жирного веса шрифта
+  // Обводка в 10 % стороны буквы: штрихи «М» и «О» жирнее самого жирного веса шрифта
   // (владелец, 15.09: «толщину букв тоже больше») — и площадь под слова заметно больше.
-  const mask = letterMask(letter, { width, height, cell: 3, family: sans, stroke: Math.round(width * 0.1) });
+  const maskOf = (side) => letterMask(letter, { width: side, height: side, cell: 3, family: sans,
+                                                stroke: Math.round(side * 0.1) });
   const measure = canvasMeasurer(serif);
-  if (!mask || !measure) return cloud(box, dimension, counts, { rareHidden, onRare });
+  const probe = maskOf(120);
+  if (!probe || !measure) return cloud(box, dimension, counts, { rareHidden, onRare });
 
   const { chosen, entries, rare, weight } = cloudEntries(dimension, counts, rareHidden);
-  const words = entries.map(([value, n]) => ({ value, weight: weight(n), n }));
+  // Редкие (одноразовые) метки тоже идут в букву — последними и самым мелким кеглем: ими
+  // добивается место, которое иначе осталось бы пустым (владелец, 29.09: «оттуда брать тоже»).
+  // За «ещё N редких» остаются только те, что не влезли.
+  const words = [
+    ...entries.map(([value, n]) => ({ value, weight: weight(n), n })),
+    ...rare.map(([value, n]) => ({ value, weight: 0, n, rare: true })),
+  ];
   const byValue = new Map(words.map((w) => [w.value, w]));
+  const seed = hashSeed(entries.map(([v, n]) => `${v}:${n}`));
   // Потолок кегля 22, не 26: замерено в странице на 91 теме — при 24 не влезают 13 слов,
   // при 22 четыре; крупные слова съедают площадь буквы быстрее, чем добавляют читаемости.
-  // Не влезли все — потолок ужимается на два пункта и раскладка считается заново (≈60 мс за
-  // проход): владелец просил, чтобы темы влезли в «М» ВСЕ; хвост под буквой — крайний случай.
-  const seed = hashSeed(entries.map(([v, n]) => `${v}:${n}`));
   const top = width < 360 ? 19 : 22;
+  const MIN = 10;
+
+  // ⚠️ Буква — ПО РАЗМЕРУ слов (владелец, 29.09). Была всегда полной, а слова рассыпались по
+  // случайным клеткам маски: под фильтром от 91 темы оставалось полтора десятка, и они лежали
+  // развалинами по огромной «М». Теперь сторона буквы считается от площади слов при их кегле:
+  // слова остаются того же размера, а буква сжимается, пока они снова не лягут плотно и не
+  // сложат форму. Доля клеток, которую занимает сам глиф, от размера не зависит (обводка — те
+  // же 10 % стороны), поэтому её хватает померить на маленькой маске. FILL — какую часть
+  // штрихов слова реально занимают при случайной раскладке; меньше — буква крупнее и рыхлее.
+  // Крошечная буква рисуется всегда, даже из двух слов (решение владельца): не влезло — сторона
+  // растёт шагами, до полной. Уже на полной — прежнее ужатие кегля; хвост под буквой — крайний случай.
+  const FILL = 0.85;
+  const glyph = probe.grid.reduce((sum, v) => sum + (v ? 1 : 0), 0) / probe.grid.length;
+  let area = 0;
+  for (const w of words) {
+    const m = measure(w.value, MIN + (top - MIN) * w.weight);
+    area += (m.w + 2) * (m.h + 2);
+  }
+  let side = Math.min(width, Math.max(80, Math.ceil(Math.sqrt(area / (glyph * FILL)))));
   let placed = [];
   let dropped = [];
-  for (const cap of [top, top - 2, top - 4, top - 6]) {
-    ({ placed, dropped } = layoutWords(mask, words, measure, { seed, minSize: 10, maxSize: cap }));
-    if (!dropped.length) break;
+  for (;;) {
+    ({ placed, dropped } = layoutWords(maskOf(side), words, measure, { seed, minSize: MIN, maxSize: top }));
+    if (!dropped.length || side >= width) break;
+    side = Math.min(width, Math.ceil(side * 1.15));
   }
+  // Не влезли все и на полной — потолок ужимается на два пункта и раскладка считается заново
+  // (≈60 мс за проход): владелец просил, чтобы темы влезли в «М» ВСЕ.
+  const lost = () => dropped.filter((v) => !byValue.get(v).rare);
+  if (lost().length) {
+    const full = maskOf(width);
+    for (const cap of [top - 2, top - 4, top - 6]) {
+      ({ placed, dropped } = layoutWords(full, words, measure, { seed, minSize: MIN, maxSize: cap }));
+      if (!lost().length) break;
+    }
+  }
+  // Меньшая буква — по центру своей колонки (владелец): «М» и «О» остаются парой.
+  const shift = Math.max(0, ((box.clientWidth || width) - side) / 2);
+  const height = side;
+  placed = placed.map((p) => ({ ...p, x: p.x + shift }));
   const nodes = placed.map((p) => cloudWord(
     dimension, p.value, byValue.get(p.value).n, p.weight, chosen.includes(p.value), " lc",
     `left:${p.x.toFixed(1)}px;top:${p.y.toFixed(1)}px;font-size:${p.size.toFixed(1)}px;--rot:${p.angle}deg`,
   ));
   // Не влезло в букву — строкой под ней: слово из фильтра пропасть не может.
-  const tail = dropped.map((v) => cloudWord(dimension, v, byValue.get(v).n, byValue.get(v).weight, chosen.includes(v)));
-  const toggle = rareToggle(rare, entries, rareHidden, onRare);
+  const tail = lost().map((v) => cloudWord(dimension, v, byValue.get(v).n, byValue.get(v).weight, chosen.includes(v)));
+  const rareLeft = rare.filter(([v]) => dropped.includes(v));
+  const toggle = rareToggle(rareLeft, entries, rareHidden, onRare);
   const under = tail.length || toggle ? el("div", { class: "lc-under" }, ...tail, toggle) : null;
   box.classList.add("lcloud");
   box.style.height = `${height}px`;
