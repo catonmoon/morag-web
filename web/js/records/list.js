@@ -328,7 +328,7 @@ function letterCloud(box, dimension, counts, letter, { rareHidden = false, onRar
 // магнита), и так же случайно: узор, палитра и цель — из `theme.halo`, при `pattern: random`
 // на каждое наведение новые. `drive()` красит символы-ячейки `<i data-c data-r>`, поэтому на
 // время наведения текст слова разбирается на ячейки (строка одна), а на уходе собирается обратно.
-// Светлая тема — без теней, как у знака (владелец, 16.09: «переливы с тёмной тенью — грязно»).
+// Без свечения в обеих темах (владелец, 30.09): ореол размывает мелкие буквы облака.
 // Слушатель один на поле буквы и переживает перерисовку: слова внутри меняются, поле — нет.
 // Только для мыши: на тачскрине наведения нет.
 const shimmering = new WeakSet();
@@ -347,11 +347,13 @@ function shimmer(box) {
     const word = event.target.closest?.(".fcw.lc");
     if (!word || word === run?.word) return;
     stop();
-    const light = document.documentElement.getAttribute("data-theme") === "light";
     const base = haloOptions();
     // Без конфига темы — всё равно случайно: сайт без `theme.halo` не должен терять эффект.
     const opts = base.pattern ? base : { pattern: "random", target: "random" };
-    const tuned = light ? withoutShadow(opts) : opts;
+    // Без свечения в ЛЮБОЙ теме (владелец, 30.09: «делает буквы размытыми»): у мелкого кегля
+    // облака ореол размывает буквы, у крупного знака в шапке — нет. Ореол выпадает из пула,
+    // остаётся подмена символов на гребне волны — буквы чёткие.
+    const tuned = withoutShadow(opts);
     if (!tuned) return;
     const text = word.textContent;
     word.dataset.cols = String(text.length);
