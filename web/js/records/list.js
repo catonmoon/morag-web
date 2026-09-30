@@ -11,7 +11,7 @@
 import { $, el, fmtDate, fmtDuration, countOf } from "../ui/dom.js";
 import { paintSection } from "../ui/theme.js";
 import { canvasMeasurer, hashSeed, layoutWords, letterMask } from "./letter-cloud.js";
-import { MAGNET, pull } from "./magnet.js";
+import { drive as driveHalo, haloOptions, withoutShadow } from "../ui/halo.js";
 import { coverUrl, getFrames, getRecords } from "../api.js";
 import {
   EMPTY, MULTI, SORTS, applyFilters, facet, fromQuery, hasValue, isEmpty, listOf, sortFor,
@@ -318,55 +318,55 @@ function letterCloud(box, dimension, counts, letter, { rareHidden = false, onRar
   box.classList.add("lcloud");
   box.style.height = `${height}px`;
   box.replaceChildren(...nodes);
-  magnetize(box, placed.map((p, i) => ({ node: nodes[i], x: p.x, y: p.y })));
+  shimmer(box);
   // Хвост — соседом, а не внутрь: внутри поля всё абсолютно позиционировано.
   box.nextElementSibling?.classList.contains("lc-under") && box.nextElementSibling.remove();
   if (under) box.after(under);
 }
 
-// Слова рядом с курсором растут и тянутся к нему (владелец, 15.09). Центры слов известны из
-// раскладки — DOM не меряем; на каждый кадр — только запись трёх переменных в стиль тех слов,
-// что в радиусе, остальным сбрасываем один раз. Только для мыши: на тачскрине курсора нет,
-// а «прыгающие» под пальцем слова мешали бы попасть. Слушатели переживают перерисовку:
-// вешаются на поле один раз, а слова берут из последней раскладки.
-const magnets = new WeakMap();
-function magnetize(box, words) {
-  if (!matchMedia?.("(hover: hover) and (pointer: fine)").matches) return;
-  if (magnets.has(box)) {
-    magnets.get(box).words = words;
-    return;
-  }
-  const m = { words, raf: 0, pointer: null, touched: new Set() };
-  magnets.set(box, m);
-  const set = (w, { x, y, s }) => {
-    w.node.style.setProperty("--mx", `${x.toFixed(1)}px`);
-    w.node.style.setProperty("--my", `${y.toFixed(1)}px`);
-    w.node.style.setProperty("--ms", s.toFixed(3));
+// Слово под курсором переливается так же, как название сайта в шапке (владелец, 30.09: вместо
+// магнита), и так же случайно: узор, палитра и цель — из `theme.halo`, при `pattern: random`
+// на каждое наведение новые. `drive()` красит символы-ячейки `<i data-c data-r>`, поэтому на
+// время наведения текст слова разбирается на ячейки (строка одна), а на уходе собирается обратно.
+// Светлая тема — без теней, как у знака (владелец, 16.09: «переливы с тёмной тенью — грязно»).
+// Слушатель один на поле буквы и переживает перерисовку: слова внутри меняются, поле — нет.
+// Только для мыши: на тачскрине наведения нет.
+const shimmering = new WeakSet();
+function shimmer(box) {
+  if (shimmering.has(box) || !matchMedia?.("(hover: hover) and (pointer: fine)").matches) return;
+  if (matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+  shimmering.add(box);
+  let run = null;
+  const stop = () => {
+    if (!run) return;
+    run.stop();
+    run.word.textContent = run.text;
+    run = null;
   };
-  const frame = () => {
-    m.raf = 0;
-    const next = new Set();
-    if (m.pointer) {
-      for (const w of m.words) {
-        const dx = m.pointer.x - w.x, dy = m.pointer.y - w.y;
-        if (Math.abs(dx) > MAGNET.radius || Math.abs(dy) > MAGNET.radius) continue;
-        const p = pull(dx, dy);
-        if (p.s === 1) continue;
-        set(w, p);
-        next.add(w);
-      }
-    }
-    for (const w of m.touched) if (!next.has(w)) set(w, { x: 0, y: 0, s: 1 });
-    m.touched = next;
-  };
-  box.addEventListener("pointermove", (event) => {
-    const r = box.getBoundingClientRect();
-    m.pointer = { x: event.clientX - r.left, y: event.clientY - r.top };
-    m.raf ||= requestAnimationFrame(frame);
+  box.addEventListener("pointerover", (event) => {
+    const word = event.target.closest?.(".fcw.lc");
+    if (!word || word === run?.word) return;
+    stop();
+    const light = document.documentElement.getAttribute("data-theme") === "light";
+    const base = haloOptions();
+    // Без конфига темы — всё равно случайно: сайт без `theme.halo` не должен терять эффект.
+    const opts = base.pattern ? base : { pattern: "random", target: "random" };
+    const tuned = light ? withoutShadow(opts) : opts;
+    if (!tuned) return;
+    const text = word.textContent;
+    word.dataset.cols = String(text.length);
+    word.dataset.rows = "1";
+    word.replaceChildren(...[...text].map((ch, c) => {
+      const cell = document.createElement("i");
+      cell.dataset.c = String(c);
+      cell.dataset.r = "0";
+      cell.textContent = ch;
+      return cell;
+    }));
+    run = { word, text, ...driveHalo(word, tuned) };
   });
-  box.addEventListener("pointerleave", () => {
-    m.pointer = null;
-    m.raf ||= requestAnimationFrame(frame);
+  box.addEventListener("pointerout", (event) => {
+    if (run && !run.word.contains(event.relatedTarget)) stop();
   });
 }
 

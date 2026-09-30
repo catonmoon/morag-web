@@ -206,10 +206,10 @@ body[data-view="signin"] #user-wrap{display:none}
 .fletters .fcap{text-align:center}
 .lcloud{position:relative;padding:0;overflow:visible}
 .fcw.lc{position:absolute;margin:0;padding:0 .12em;white-space:nowrap;line-height:1.1;
-  transform:translate(-50%,-50%) translate(var(--mx,0px),var(--my,0px)) rotate(var(--rot,0deg)) scale(var(--ms,1));
-  transform-origin:center;transition:transform .12s ease-out}
-/* Магнит (--mx/--my/--ms ставит list.js по движению курсора): короткий переход сглаживает
-   шаги указателя, длинный — отставал бы от руки и читался как тормоз. */
+  transform:translate(-50%,-50%) rotate(var(--rot,0deg));transform-origin:center}
+/* Слово под курсором переливается, как знак в шапке (list.js → ui/halo.js): на время наведения
+   его буквы — ячейки <i>, им нужен прямой начертания, иначе слово поедет курсивом. */
+.fcw.lc i{font-style:normal}
 .fcw.lc:hover{z-index:2}
 .lc-under{text-align:center;line-height:1.3;padding:6px 6px 0}
 
