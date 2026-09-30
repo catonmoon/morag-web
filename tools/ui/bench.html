@@ -73,9 +73,6 @@
     <div class="scene" id="scene-screen" hidden>
       <h3>Экран <span>— кадр и то, что на нём увидели</span></h3>
     </div>
-    <div class="scene" id="scene-relisten" hidden>
-      <h3>Переслушивание <span>— места, где модель сорвалась: что было и что слышно на самом деле</span></h3>
-    </div>
 
     <div class="scene" id="scene-text" hidden>
       <h3>Текст <span>— сперва печатается по мере распознавания, потом правки идут прямо в нём</span></h3>
@@ -90,14 +87,12 @@ import { clock as mmss, el } from "./dom.js";
 import { state as showState } from "./play.js";
 import { textScene } from "./text.js";
 import { screenScene } from "./screen.js";
-import { relistenScene } from "./relisten.js";
 import { sendScene, size as fileSize } from "./send.js";
 import { wave } from "./wave.js";
 
 const id = (x) => document.getElementById(x);
 const scenes = { wave: wave(id("scene-wave")), text: textScene(id("scene-text")),
-                 screen: screenScene(id("scene-screen")), send: sendScene(id("scene-send")),
-                 relisten: relistenScene(id("scene-relisten")) };
+                 screen: screenScene(id("scene-screen")), send: sendScene(id("scene-send")) };
 let trace = [];
 let at = 0;
 let timer = null;
@@ -151,7 +146,6 @@ function feed(e) {
   scenes.text.apply(e);
   scenes.screen.apply(e);
   scenes.send.apply(e);
-  scenes.relisten.apply(e);
 }
 
 function step(n = 1) {
@@ -193,7 +187,6 @@ function reset() {
   scenes.text.reset();
   scenes.screen.reset();
   scenes.send.reset();
-  scenes.relisten.reset();
   scenes.wave.fit();
   paint();
 }

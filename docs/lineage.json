@@ -462,9 +462,6 @@
     "tools/ui/play.js": {
       "status": "ours"
     },
-    "tools/ui/relisten.js": {
-      "status": "ours"
-    },
     "tools/ui/screen.js": {
       "status": "ours"
     },

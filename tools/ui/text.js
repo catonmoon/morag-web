@@ -14,6 +14,9 @@
 //      первое ухо, второе, третий голос, — и чем решено; выбранное встаёт в текст. Варианты видны
 //      сами, без наведения (владелец, 30.09: «показывать максимально наглядно»), потом уходят в
 //      слой по наведению, как у правок.
+//   2б) «переслушивается» (петля или выпавшая речь): место, где модель сорвалась, заменяется
+//      услышанным ПРЯМО В ТЕКСТЕ; прежнее («ИИИИИИ») — в слое над ним вместе с исходом. Отдельной
+//      сцены-списка больше нет (владелец, 30.09: «можно ли показать на общем тексте?»).
 //   4) редактор: правки те же, что у финал-раунда, плюс свидетель; в шапке — какую страницу он
 //      читает и какое окно переслушивает.
 //
@@ -42,6 +45,15 @@ export const BY = {
   "голосование": "два уха из трёх",
   "вето": "запись знает прежнее слово — большинство не указ",
   "спорно": "уши не сошлись — оставлено как было",
+};
+
+/** Исход переслушивания — словами стадии. */
+export const HEARD = {
+  "речь": "вернулась речь",
+  "коротко": "услышано короче",
+  "тишина": "тишина — речи там нет",
+  "петля осталась": "не вышло — оставлено как было",
+  "без изменений": "без изменений",
 };
 
 /** Свидетель правки редактора. */
@@ -85,6 +97,7 @@ export function textScene(root) {
   let anchors = [];          // [[секунда, узел]] — куда листать по времени реплики
   let applied = 0, dropped = 0, turns = 0;
   let taken = 0, kept = 0;   // решения арбитража: взято / оставлено
+  let heard = 0, back = 0;   // переслушано мест / из них вернулась речь
   let edPage = "";           // шапка редактора: какая страница читается
   const jobs = [];
   let busy = 0;
@@ -300,7 +313,50 @@ export function textScene(root) {
   function runJob(job, now) {
     if (job.t === "chunk") runChunk(job, now);
     else if (job.t === "arb") runArb(job, now);
+    else if (job.t === "rl") runRelisten(job, now);
     else runFix(job, now);
+  }
+
+  /** Переслушанное место: сорвавшийся текст куска сменяется услышанным прямо в тексте.
+   *
+   * Ищем прежний текст куска целиком (событие несёт его начало, до 200 знаков); не нашли —
+   * берём черновое окно этой секунды. «Тишина» оставляет место пустым, но пометку ставит: пустое
+   * место без пометки выглядело бы как потерянный текст.
+   */
+  function runRelisten(e, now) {
+    finishTyping();
+    heard += 1;
+    const ok = e.verdict === "речь" || e.verdict === "коротко";
+    if (ok) back += 1;
+    summary();
+    current = e.from ?? current;
+    const { hold, gap } = pace(jobs.length);
+    const was = (e.was || "").trim();
+    const spot = was ? locate(was) : null;
+    if (!spot) { busy = now + gap; return; }
+    const rest = spot.node.splitText(spot.index);
+    rest.splitText(spot.word.length);
+    const mark = el("span", { class: "tx-hit", text: spot.word });
+    rest.replaceWith(mark);
+    follow(mark);
+    busy = now + hold + (ok ? CUT_MS : 0) + gap;
+    const land = () => {
+      const say = HEARD[e.verdict] || e.verdict || "";
+      const shown = ok ? (e.now || "").trim() : e.verdict === "тишина" ? "…" : spot.word;
+      const layer = el("span", { class: "ed-old" },
+        el("s", { class: "ed-gone", text: spot.word.length > 48 ? `${spot.word.slice(0, 46)}…` : spot.word }),
+        el("span", { class: "ed-note", text: `${clock(e.from)}–${clock(e.to)} · ${say}` }));
+      const fix = el("span", { class: `ed rl ${ok ? "" : "no "}fresh`.replace(/\s+/g, " ") },
+        el("span", { class: ok ? "ed-now" : "ed-kept", text: shown }), layer);
+      mark.replaceWith(fix);
+      marks.push(fix);
+      fit(layer);
+      fix.addEventListener("mouseenter", () => fit(layer));
+      setTimeout(() => fix.classList.remove("fresh"), VARS_MS);
+    };
+    if (reduced()) land();
+    else if (ok) { setTimeout(() => mark.classList.add("cut"), hold); setTimeout(land, hold + CUT_MS); }
+    else setTimeout(land, hold);
   }
 
   /** Решение арбитража на слове: подсветка → варианты над словом → выбранное в тексте.
@@ -453,6 +509,7 @@ export function textScene(root) {
 
   function summary() {
     const parts = [];
+    if (heard) parts.push(`переслушано ${heard} · вернулась речь в ${back}`);
     if (taken || kept) parts.push(`второе ухо: взято ${taken} · оставлено ${kept}`);
     if (applied || dropped) parts.push(`правки: принято ${applied} · отброшено ${dropped}`);
     if (turns) parts.push(`реплик ${turns}`);
@@ -502,6 +559,12 @@ export function textScene(root) {
         if (drafts()) { jobs.push(job); pump(); } else { runChunk(job, performance.now()); }
         return;
       }
+      if (e.t === "stage.start" && e.stage === "relisten") {
+        root.removeAttribute("hidden");
+        head.textContent = "слушаю ещё раз места, где модель сорвалась — услышанное встаёт в текст";
+        return;
+      }
+      if (e.t === "relisten.span") { jobs.push({ ...e, t: "rl" }); pump(); return; }
       if (e.t === "stage.start" && e.stage === "arbitrate") {
         root.removeAttribute("hidden");
         mode = "arbitrating";
@@ -557,12 +620,12 @@ export function textScene(root) {
       mode = "idle"; pending = ""; typed = 0; tail = null; jobs.length = 0; busy = 0; landing = 0;
       speakers = []; named = {}; badges = []; lastSpk = null; chunk = null; toTop = false;
       applied = dropped = turns = current = 0;
-      taken = kept = 0; edPage = "";
+      taken = kept = 0; edPage = ""; heard = back = 0;
       marks = []; anchors = [];
       head.textContent = ""; body.replaceChildren(); count.textContent = "";
       root.setAttribute("hidden", "");
     },
-    state: () => ({ mode, applied, dropped, turns, taken, kept, head: head.textContent,
+    state: () => ({ mode, applied, dropped, turns, taken, kept, heard, back, head: head.textContent,
                     text: body.textContent, speakers: badges.length,
                     edits: marks.length, queued: jobs.length }),
   };

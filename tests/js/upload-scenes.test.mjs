@@ -133,7 +133,6 @@ const { textScene } = await import(join(repo, "tools/ui/text.js"));
 const { screenScene } = await import(join(repo, "tools/ui/screen.js"));
 const { wave } = await import(join(repo, "tools/ui/wave.js"));
 const { sendScene, size } = await import(join(repo, "tools/ui/send.js"));
-const { relistenScene } = await import(join(repo, "tools/ui/relisten.js"));
 
 // --- темп ------------------------------------------------------------------------------------
 
@@ -526,32 +525,24 @@ const { relistenScene } = await import(join(repo, "tools/ui/relisten.js"));
 // --- переслушивание -----------------------------------------------------------------------------
 
 {
-  // ⚠️ Стадия меняет расшифровку, и человек обязан видеть ЧТО именно: пары «было → стало», включая
-  // неудачи. Спрятанная неудача читается как «от меня что-то скрыли».
+  // Переслушивание — В ОБЩЕМ ТЕКСТЕ (владелец, 30.09), а не отдельным списком: петля сменяется
+  // услышанным на месте, прежнее — в слое над ним; тишина и неудача тоже видны.
   const root = new El("div");
-  const scene = relistenScene(root);
-  assert.equal(root.attrs.hidden, "", "до стадии сцены не видно");
-
-  scene.apply({ t: "client.step", step: "relisten" });
-  assert.equal(root.attrs.hidden, undefined, "шаг стадии показывает сцену");
-
-  scene.apply({ t: "relisten.span", from: 610, to: 623, kind: "char",
-                was: "И".repeat(12), now: "Нам нужно обсудить это отдельно." });
-  assert.match(root.textContent, /10:10–10:23/, "время места подписано");
-  assert.match(root.textContent, /Нам нужно обсудить/);
-  assert.match(root.textContent, /И{12}/, "прежний текст остаётся виден — зачёркнутым");
-
-  scene.apply({ t: "relisten.span", from: 700, to: 712, kind: "stretch", verdict: "тишина",
-                was: "Ага.", now: "" });
+  const scene = textScene(root);
+  scene.apply({ t: "stage.start", stage: "relisten" });
+  scene.apply({ t: "turn.text", turn: 0, start: 610, text: "ИИИИИИИИИИИИ и дальше обычная речь ах ах ах ах" });
+  scene.apply({ t: "relisten.span", from: 610, to: 623, kind: "char", verdict: "речь",
+                was: "ИИИИИИИИИИИИ", now: "Нам нужно обсудить это отдельно." });
   scene.apply({ t: "relisten.span", from: 800, to: 812, kind: "word", verdict: "петля осталась",
-                was: "ах ах ах", now: "ах ах ах" });
-  assert.equal(scene.state().seen, 3);
-  assert.match(root.textContent, /тишина/, "честная тишина показана, а не спрятана");
-  assert.match(root.textContent, /не вышло/, "неудача показана тоже");
-
-  scene.reset();
-  assert.equal(scene.state().seen, 0);
-  assert.equal(root.attrs.hidden, "");
+                was: "ах ах ах ах", now: "ах ах ах ах" });
+  flush();
+  const s = scene.state();
+  assert.equal(s.heard, 2); assert.equal(s.back, 1);
+  assert.match(s.text, /^Нам нужно обсудить это отдельно\./, "услышанное встало на место петли");
+  assert.match(s.text, /ИИИИИИИИИИИИ/, "прежняя петля осталась видна — в слое");
+  assert.match(s.text, /вернулась речь/);
+  assert.match(s.text, /не вышло — оставлено как было/, "неудача показана тоже");
+  assert.match(root.textContent, /переслушано 2 · вернулась речь в 1/);
 }
 
 

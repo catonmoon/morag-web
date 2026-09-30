@@ -126,21 +126,6 @@ button.icon{background:none;border:1px solid var(--line);color:var(--ink-dim);pa
 .sn-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (max-width:560px){ .sn-row{grid-template-columns:1fr auto;gap:4px} .sn-row .bar{grid-column:1 / -1} }
 
-/* переслушивание: пары «было → стало». Цвет несёт смысл — вернулась речь, честная тишина, не вышло */
-.rl-list{display:grid;gap:8px;margin:0 0 8px}
-.rl-row{border-left:3px solid var(--line);padding:6px 0 6px 10px}
-.rl-row.ok{border-color:var(--good)}
-.rl-row.hush{border-color:var(--ink-faint)}
-.rl-row.bad{border-color:var(--bad)}
-.rl-head{display:flex;gap:10px;align-items:baseline;font:11px/1.5 var(--mono);color:var(--ink-faint)}
-.rl-verdict{color:var(--ink-dim)}
-.rl-row.ok .rl-verdict{color:var(--good)}
-.rl-row.bad .rl-verdict{color:var(--bad)}
-.rl-was{margin:2px 0 0;font:13px/1.5 var(--serif);color:var(--ink-faint);
-        text-decoration:line-through var(--bad);text-decoration-thickness:1px;
-        overflow-wrap:anywhere;max-height:3em;overflow:hidden}
-.rl-now{margin:1px 0 0;font:15px/1.5 var(--serif);color:var(--ink);overflow-wrap:anywhere}
-
 /* текст — ГЛАВНОЕ в окне: большое поле, по нему листают назад, как по расшифровке */
 .tx-head{font:11px/1.5 var(--mono);text-transform:uppercase;letter-spacing:.06em;
          color:var(--ink-faint);margin:0 0 6px;min-height:1.5em}
@@ -206,6 +191,10 @@ button.icon{background:none;border:1px solid var(--line);color:var(--ink-dim);pa
 .ed-var b{color:var(--ink);font-weight:500}
 .ed-vars .ed-note{grid-column:1 / -1;margin:3px 0 0}
 .ed-old.below{bottom:auto;top:1.5em}
+/* Переслушанное место: вернувшаяся речь — зелёным (это не правка, а речь, которую модель
+   потеряла); тишина и «не вышло» — пунктиром. Прежняя петля — в слое над местом. */
+.ed.rl .ed-now{color:var(--good)}
+.ed.rl.no .ed-kept{text-decoration:underline dotted var(--ink-faint);text-underline-offset:3px}
 .ed.arb .ed-now{color:var(--accent)}
 .ed.arb.no .ed-kept{text-decoration:underline dotted var(--sonar);text-underline-offset:3px}
 

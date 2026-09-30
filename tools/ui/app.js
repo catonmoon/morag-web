@@ -12,7 +12,6 @@ import { $, clock, el, reduced } from "./dom.js";
 import { budget, state as showState } from "./play.js";
 import { textScene } from "./text.js";
 import { screenScene } from "./screen.js";
-import { relistenScene } from "./relisten.js";
 import { sendScene, size as fileSize } from "./send.js";
 import { wave } from "./wave.js";
 
@@ -36,7 +35,7 @@ let videos = [];
 
 // --- показ работы -----------------------------------------------------------------------------
 
-const scenes = { wave: wave(id("scene-wave")), text: textScene(id("scene-text")), screen: screenScene(id("scene-screen"), { frameUrl: (p) => `/api/frame?path=${encodeURIComponent(p)}&t=${encodeURIComponent(T)}` }), send: sendScene(id("scene-send")), relisten: relistenScene(id("scene-relisten")) };
+const scenes = { wave: wave(id("scene-wave")), text: textScene(id("scene-text")), screen: screenScene(id("scene-screen"), { frameUrl: (p) => `/api/frame?path=${encodeURIComponent(p)}&t=${encodeURIComponent(T)}` }), send: sendScene(id("scene-send")) };
 const queue = [];        // события, пришедшие, но ещё не показанные
 let cursor = 0;
 let noEvents = false;    // старый адаптер/сервер без ленты — падаем обратно на лог
@@ -53,7 +52,6 @@ function dispatch(e) {
   scenes.text.apply(e);
   scenes.screen.apply(e);
   scenes.send.apply(e);
-  scenes.relisten.apply(e);
   show.lastAt = performance.now() / 1000;
   // ⚠️ Начало стадии помним отдельно от последнего события: подпись говорит, сколько идёт САМА
   // СТАДИЯ, а не сколько молчит канал. Без этой метки в тишине было нечего сказать, кроме «без
@@ -475,7 +473,6 @@ id("go").onclick = async () => {
     // ⚠️ Сцену экрана раньше не сбрасывали — и кадры прошлого прогона оставались на экране.
     // С параллельным разбором это стало видно сразу: она теперь появляется в первые секунды.
     scenes.screen.reset();
-    scenes.relisten.reset();
     await tick();
   } catch (e) { id("msg").textContent = e.message; id("msg").className = "msg bad"; }
 };
