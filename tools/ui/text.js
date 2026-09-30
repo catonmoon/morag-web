@@ -36,6 +36,7 @@ const GAP_MS = 240;        // пауза между правками
 const HELD_MS = 4000;      // человек листает сам — столько за ним не бежим
 const FRESH_MS = 1600;     // сколько прежнее слово видно само, без курсора
 const CUT_MS = 340;        // сколько слово зачёркнуто до того, как его сменит замена
+const DWELL_MS = 900;      // сколько правка остаётся в кадре ПОСЛЕ замены, прежде чем окно уйдёт к следующей
 const VARS_MS = 2600;      // сколько варианты арбитража видны сами — их три-четыре строки, не одно слово
 
 /** Чем решил арбитраж — человеческими словами (ключи — `by` движка). */
@@ -160,6 +161,13 @@ export function textScene(root) {
     return { hold: Math.round(HOLD_MS * k), gap: Math.round(GAP_MS * k) };
   }
 
+  /** Сколько правка стоит в кадре после замены. ⚠️ Прежде окно уходило к следующей правке через
+   * четверть секунды после замены: правка производилась, но увидеть её было нельзя (владелец,
+   * 30.09). Очередь длинная — меньше, но не до нуля: смысл показа — увидеть. */
+  function dwell(queued) {
+    return Math.round(DWELL_MS * (queued > 24 ? 0.35 : queued > 8 ? 0.6 : 1));
+  }
+
   function tick(now) {
     raf = null;
     let more = false;
@@ -253,12 +261,20 @@ export function textScene(root) {
     return best;
   }
 
-  /** Найти слово в тексте: сначала рядом с репликой, потом где угодно. */
-  function locate(word) {
+  /** Найти слово в тексте — в куске, где оно звучит, потом в ближайших ПО ВРЕМЕНИ.
+   *
+   * ⚠️⚠️ Искать надо от секунды САМОЙ ПРАВКИ (`sec`), а не от последней пришедшей реплики, и
+   * соседей брать по близости во времени, а не с начала документа. Реплики приходят в ленте сразу,
+   * а правки идут очередью с отставанием: поиск от «текущей» реплики находил термин в ЧУЖОЙ реплике
+   * (замер 30.09: три правки «графана» в трёх репликах — все три легли со сдвигом), а запасной ход
+   * «первое совпадение с начала» уводил окно наверх, и правку было не видно вовсе.
+   */
+  function locate(word, sec = current) {
     const re = wordRe(word);
     const pieces = [...body.children].filter((n) => n.classList.contains("tx-piece"));
-    const from = near(current);
-    const order = from ? [from, ...pieces.filter((p) => p !== from)] : pieces;
+    const inside = (p) => p.at != null && sec + 1 >= p.at && sec - 1 <= (p.till ?? p.at);
+    const dist = (p) => (inside(p) ? -1 : p.at == null ? 1e9 : p.at >= sec ? p.at - sec : (sec - p.at) * 2);
+    const order = pieces.map((p, i) => [dist(p), i, p]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((x) => x[2]);
     for (const piece of order) {
       for (const node of [...piece.childNodes]) {
         if (node.nodeType !== 3) continue;                   // текстовые узлы; корректуру не трогаем
@@ -332,14 +348,14 @@ export function textScene(root) {
     current = e.from ?? current;
     const { hold, gap } = pace(jobs.length);
     const was = (e.was || "").trim();
-    const spot = was ? locate(was) : null;
+    const spot = was ? locate(was, Number(e.from ?? current)) : null;
     if (!spot) { busy = now + gap; return; }
     const rest = spot.node.splitText(spot.index);
     rest.splitText(spot.word.length);
     const mark = el("span", { class: "tx-hit", text: spot.word });
     rest.replaceWith(mark);
     follow(mark);
-    busy = now + hold + (ok ? CUT_MS : 0) + gap;
+    busy = now + hold + (ok ? CUT_MS : 0) + dwell(jobs.length) + gap;
     const land = () => {
       const say = HEARD[e.verdict] || e.verdict || "";
       const shown = ok ? (e.now || "").trim() : e.verdict === "тишина" ? "…" : spot.word;
@@ -371,14 +387,14 @@ export function textScene(root) {
     summary();
     current = e.from ?? current;
     const { hold, gap } = pace(jobs.length);
-    const spot = locate(e.was || "");
+    const spot = locate(e.was || "", Number(e.from ?? current));
     if (!spot) { busy = now + gap; return; }
     const rest = spot.node.splitText(spot.index);
     rest.splitText(spot.word.length);
     const mark = el("span", { class: "tx-hit", text: spot.word });
     rest.replaceWith(mark);
     follow(mark);
-    busy = now + hold + gap;
+    busy = now + hold + dwell(jobs.length) + gap;
     const land = () => {
       const rows = [["1-е ухо", spot.word, e.taken], ["2-е ухо", e.now, false]];
       if (e.clean) rows.push(["3-й голос", e.clean, false]);
@@ -445,7 +461,7 @@ export function textScene(root) {
     if (ok) applied += 1; else dropped += 1;
     summary();
     const { hold, gap } = pace(jobs.length);
-    const spot = locate(e.was || "");
+    const spot = locate(e.was || "", Number(e.start ?? current));
     if (!spot) { busy = now + gap; return; }                   // вне показанного — честно молчим
 
     // Разрезаем текстовый узел и ставим на слово ОДНУ подсветку — ту же, что и всегда.
@@ -455,7 +471,7 @@ export function textScene(root) {
     rest.replaceWith(mark);
     void after;
     follow(mark);                                             // листаем к СЛОВУ, а не к куску: кусок бывает выше окна
-    busy = now + hold + (ok ? CUT_MS : 0) + gap;
+    busy = now + hold + (ok ? CUT_MS : 0) + dwell(jobs.length) + gap;
 
     // Зачёркивание — ОТДЕЛЬНЫЙ шаг перед заменой, и только у принятой правки: мгновенная
     // подмена читается как опечатка показа — глаз не успевает увидеть, ЧТО именно исправили.
@@ -597,10 +613,11 @@ export function textScene(root) {
         return;
       }
       if (e.t === "turn.text") {
-        current = e.start || 0;
-        // Текста ещё нет (окно открыли на середине прогона) — показываем хотя бы эту реплику.
-        if (!body.children.length) append(current, e.text || "");
-        else follow(near(current));
+        // ⚠️ Реплика НЕ уводит окно, пока в очереди правки: иначе окно металось между новой
+        // репликой и правкой из прошлой (правка сама листает к своему слову, когда до неё дойдёт).
+        const sec = e.start || 0;
+        if (!body.children.length) { current = sec; append(sec, e.text || ""); }
+        else if (!jobs.length) { current = sec; follow(near(sec)); }
         return;
       }
       if (e.t === "turn.fix") { jobs.push(e); pump(); return; }

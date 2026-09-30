@@ -637,4 +637,25 @@ const { sendScene, size } = await import(join(repo, "tools/ui/send.js"));
   assert.match(scene.state().text, /он поставила1-е ухо/, "и не стёрто им");
 }
 
+
+{
+  // ⚠️⚠️ Правка ложится в СВОЮ реплику (замер 30.09): термин повторяется в каждой реплике, реплики
+  // приходят сразу, правки — очередью. Поиск от последней пришедшей реплики клал все правки со сдвигом.
+  const root = new El("div");
+  const scene = textScene(root);
+  const body = root.children.find((n) => n.classList.contains("tx-body"));
+  scene.apply({ t: "stage.start", stage: "pass2" });
+  const T = ["Первая про графана и метрики.", "Вторая про графана и алерты.", "Третья про графана и дашборды."];
+  T.forEach((text, i) => { scene.apply({ t: "chunk.start", i, n: 3, from: i * 60, to: i * 60 + 30, spk: "S0" });
+                           scene.apply({ t: "chunk.done", i, raw: text }); });
+  flush(40);
+  scene.apply({ t: "stage.start", stage: "final-round" });
+  T.forEach((text, i) => scene.apply({ t: "turn.text", turn: i, start: i * 60, text }));
+  T.forEach((_, i) => scene.apply({ t: "turn.fix", turn: i, start: i * 60, was: "графана", now: `G${i + 1}`, ok: true }));
+  flush(80);
+  const pieces = body.children.filter((n) => n.classList.contains("tx-piece")).map((p) => p.textContent);
+  pieces.forEach((text, i) => assert.match(text, new RegExp(`^${["Первая", "Вторая", "Третья"][i]} про G${i + 1}`),
+                                           `правка реплики ${i + 1} легла в неё же`));
+}
+
 console.log("ok upload-scenes");
