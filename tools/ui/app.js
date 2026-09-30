@@ -80,6 +80,9 @@ function dispatch(e) {
   if (e.t === "chunk.done") show.counter = { i: e.i, n: show.counter?.n || 0 };
   if (e.t === "chunk.start") show.counter = { i: e.i, n: e.n };
   if (e.t === "turn.done") show.counter = { i: e.done, n: e.n };
+  // Арбитраж и редактор считают своё: куски, разобранные вторым ухом, и прочитанные страницы.
+  if (e.t === "arbitrate.chunk" && e.n) show.counter = { i: e.done, n: e.n, say: `кусок ${e.done} из ${e.n}` };
+  if (e.t === "editor.done" && e.of) show.counter = { i: e.done, n: e.of, say: `страница ${e.done} из ${e.of}` };
   if (e.t === "client.step") show.stage = e.step;
   // ⚠️ У отправки счётчик в БАЙТАХ (видео — 95 % веса пакета), поэтому подпись к нему своя:
   // «512 МБ из 1.2 ГБ» вместо голых чисел, которые дал бы общий шаблон «i из n».

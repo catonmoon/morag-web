@@ -554,4 +554,96 @@ const { relistenScene } = await import(join(repo, "tools/ui/relisten.js"));
   assert.equal(root.attrs.hidden, "");
 }
 
+
+// --- сверка: арбитраж и редактор (30.09) -------------------------------------------------------
+{
+  // ⚠️ Владелец: «показывать максимально наглядно на волне или даже тексте». Проверяется, что
+  // над словом стоят ВСЕ варианты выбора и чем решено, а в тексте — выбранное.
+  const root = new El("div");
+  const scene = textScene(root);
+  scene.apply({ t: "stage.start", stage: "arbitrate" });
+  scene.apply({ t: "turn.text", turn: 0, start: 10, text: "он поставил задачу и ушёл в отпуск" });
+  scene.apply({ t: "arbitrate.chunk", done: 1, n: 3, from: 10, to: 20, heard: true, flags: ["поставил"] });
+  scene.apply({ t: "arbitrate.swap", from: 10, to: 20, was: "поставил", now: "поставила",
+                clean: "поставила", by: "голосование", taken: true });
+  scene.apply({ t: "arbitrate.swap", from: 10, to: 20, was: "отпуск", now: "отпуске",
+                by: "спорно", taken: false });
+  flush();
+  const s = scene.state();
+  assert.equal(s.taken, 1); assert.equal(s.kept, 1);
+  assert.match(s.text, /^он поставила/, "выбранное встало в текст (слой вариантов идёт за словом)");
+  assert.match(s.text, /1-е ухо/); assert.match(s.text, /2-е ухо/); assert.match(s.text, /3-й голос/);
+  assert.match(s.text, /два уха из трёх/, "чем решено — словами");
+  assert.match(s.text, /уши не сошлись/, "спор, оставленный как было, тоже виден");
+  assert.match(s.text, /ушёл в отпуск/, "непринятое решение текст не меняет");
+  assert.match(root.textContent, /второе ухо: взято 1 · оставлено 1/);
+
+  // Редактор: шапка говорит, какую страницу читает и что переслушивает; свидетель — у правки.
+  scene.apply({ t: "stage.start", stage: "editor" });
+  scene.apply({ t: "editor.page", page: 1, of: 6, from: 240, to: 480 });
+  assert.match(scene.state().head, /страница 2 из 6 \(4:00–8:00\)/);
+  scene.apply({ t: "editor.listen", page: 1, ear: "second", from: 300, to: 325, text: "…" });
+  assert.match(scene.state().head, /переслушивает 5:00–5:25 вторым ухом/);
+  scene.apply({ t: "turn.fix", turn: 0, start: 10, was: "задачу", now: "задачи", ok: true,
+                why: "", witness: "sound" });
+  flush();
+  assert.match(scene.state().text, /по звуку/, "свидетель правки виден");
+}
+{
+  // Волна: где слушали второй раз, решения точками, правки тиками — и подсказка словами.
+  const root = new El("div");
+  const scene = wave(root);
+  scene.apply({ t: "job.meta", audio_sec: 600 });
+  scene.apply({ t: "arbitrate.chunk", done: 1, n: 2, from: 10, to: 20, heard: true, flags: ["x"] });
+  scene.apply({ t: "arbitrate.chunk", done: 2, n: 2, from: 20, to: 30, heard: false, flags: [] });
+  scene.apply({ t: "arbitrate.swap", from: 10, to: 20, was: "поставил", now: "поставила",
+                clean: "поставила", by: "голосование", taken: true });
+  scene.apply({ t: "editor.listen", page: 0, ear: "clean", from: 40, to: 65, text: "" });
+  scene.apply({ t: "turn.fix", start: 50, was: "кафка", now: "Kafka", ok: true });
+  const st = scene.state();
+  assert.equal(st.checks, 1, "пропущенный воротами кусок второе ухо не слушало");
+  assert.equal(st.votes, 1); assert.equal(st.ears, 1); assert.equal(st.edits, 1);
+  assert.equal(st.cursor, 30, "кромка идёт за арбитражем");
+  scene.hoverSecond(15);
+  assert.match(scene.state().tip, /поставил → поставила · два уха из трёх/);
+  const keyNode = root.children.find((n) => n.classList.contains("wv-key"));
+  assert.match(keyNode.textContent, /слушало второе ухо/, "ключ к значкам появился");
+}
+{
+  // Полоса: редактор ВМЕСТО финал-раунда — в сумму входит один из них, конец = 100 %.
+  const all = ["audio", "voices", "record", "screen", "pack", "send", "diarize", "pass1", "glossary",
+               "pass2", "relisten", "arbitrate", "speakers", "naming", "align"];
+  assert.equal(state({ done: [...all, "final-round"] }).pct, 100);
+  assert.equal(state({ done: [...all, "editor"] }).pct, 100, "с редактором полоса тоже доходит до конца");
+  assert.match(state({ stage: "editor" }).say, /редактор перечитывает страницы/);
+  assert.match(state({ stage: "arbitrate" }).say, /сверяю вторым ухом/);
+}
+
+
+{
+  // ⚠️⚠️ Гонка, пойманная на стенде 30.09: в фоновой вкладке браузер придерживает таймеры, кусок
+  // чистовика встаёт на место черновика ПОЗЖЕ, чем пришло решение арбитража, — и стирал его.
+  const held = [];
+  const realTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (fn) => { held.push(fn); return 1; };
+  const root = new El("div");
+  const scene = textScene(root);
+  scene.apply({ t: "stage.start", stage: "pass1" });
+  scene.apply({ t: "draft.window", from: 0, to: 30, text: "он поставил задачу черновик" });
+  scene.apply({ t: "stage.start", stage: "pass2" });
+  scene.apply({ t: "chunk.start", i: 1, n: 1, from: 0, to: 30, spk: "S0" });
+  scene.apply({ t: "chunk.done", i: 1, raw: "он поставил задачу и ушёл" });
+  scene.apply({ t: "stage.start", stage: "arbitrate" });
+  scene.apply({ t: "arbitrate.swap", from: 0, to: 30, was: "поставил", now: "поставила",
+                clean: "поставила", by: "голосование", taken: true });
+  flush(40);                                   // кадры идут, а таймеры стоят
+  assert.equal(scene.state().edits, 0, "решение ждёт, пока кусок не встанет на место");
+  while (held.length) { held.shift()(); flush(4); }
+  flush(40);
+  while (held.length) { held.shift()(); flush(4); }
+  globalThis.setTimeout = realTimeout;
+  assert.equal(scene.state().edits, 1, "решение легло после куска");
+  assert.match(scene.state().text, /он поставила1-е ухо/, "и не стёрто им");
+}
+
 console.log("ok upload-scenes");

@@ -39,6 +39,12 @@
           <option value="0">мгновенно</option>
         </select>
       </label>
+      <label>трасса
+        <select id="trace">
+          <option value="./bench-sample.jsonl">арбитраж + финал-раунд</option>
+          <option value="./bench-editor.jsonl">арбитраж + редактор</option>
+        </select>
+      </label>
       <label><input type="checkbox" id="only-bad" style="width:auto"> только отвергнутые</label>
       <label><input type="checkbox" id="calm" style="width:auto"> меньше движения</label>
       <span class="now" id="pos"></span>
@@ -135,6 +141,8 @@ function feed(e) {
   if (e.t === "stage.end" && !show.done.includes(e.stage)) show.done.push(e.stage);
   if (e.t === "chunk.start") show.counter = { i: e.i, n: e.n };
   if (e.t === "turn.done") show.counter = { i: e.done, n: e.n };
+  if (e.t === "arbitrate.chunk" && e.n) show.counter = { i: e.done, n: e.n, say: `кусок ${e.done} из ${e.n}` };
+  if (e.t === "editor.done" && e.of) show.counter = { i: e.done, n: e.of, say: `страница ${e.done} из ${e.of}` };
   if (e.t === "upload.file") {
     show.counter = { i: e.moved || 0, n: e.whole || 0,
                      say: `${fileSize(e.moved)} из ${fileSize(e.whole)}` };
@@ -210,7 +218,10 @@ document.addEventListener("drop", async (e) => {
 });
 window.addEventListener("resize", () => scenes.wave.fit());
 
-fetch("./bench-sample.jsonl").then((r) => r.text()).then(load).catch(() => paint());
+// Две записанные трассы: одна и та же синтетическая запись — с финал-раундом и с редактором.
+const fetchTrace = () => fetch(id("trace").value).then((r) => r.text()).then(load).catch(() => paint());
+id("trace").onchange = fetchTrace;
+fetchTrace();
 </script>
 </body>
 </html>

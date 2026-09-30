@@ -102,6 +102,18 @@ button.icon{background:none;border:1px solid var(--line);color:var(--ink-dim);pa
         border-radius:7px;padding:2px 8px;font:11px/1.5 var(--mono);white-space:nowrap;
         box-shadow:var(--shadow-sm)}
 .wv-tip[hidden]{display:none}
+/* Ключ к значкам сверки под легендой голосов. */
+.wv-key{display:flex;flex-wrap:wrap;gap:4px 14px;margin:4px 0 0;font:11px/1.5 var(--mono);color:var(--ink-dim)}
+.wv-key[hidden]{display:none}
+.wv-key i{display:inline-block;vertical-align:middle;margin-right:6px}
+.wv-k-band{width:14px;height:4px;background:var(--sonar)}
+.wv-k-ear{width:14px;height:4px;background:var(--accent)}
+.wv-k-take,.wv-k-keep{width:8px;height:8px;border-radius:50%}
+.wv-k-veto{width:7px;height:7px;transform:rotate(45deg)}
+.wv-k-take{background:var(--accent)}
+.wv-k-keep{border:1px solid var(--ink-faint)}
+.wv-k-veto{background:var(--bad)}
+.wv-k-fix{width:2px;height:10px;background:var(--accent)}
 
 /* отправка на сайт: файл — строка с полосой; видео едет минутами, и полоса здесь главная */
 .sn-list{display:grid;gap:8px;margin:0 0 8px}
@@ -186,6 +198,16 @@ button.icon{background:none;border:1px solid var(--line);color:var(--ink-dim);pa
 .ed-gone{color:var(--ink);text-decoration:line-through var(--bad);text-decoration-thickness:1px;
          text-decoration-skip-ink:none}
 .ed-note{color:var(--ink-faint);margin-left:6px}
+/* Арбитраж: варианты СТОЛБИКОМ — «чьё ухо — что услышало», под ними чем решено. Слой тот же,
+   что у правок (виден сам, пока свежий, потом — по наведению), только выше: строк три-четыре. */
+.ed-vars{display:grid;grid-template-columns:auto auto;column-gap:10px;row-gap:1px;padding:4px 9px}
+.ed-var{display:contents}
+.ed-ear{color:var(--ink-faint)}
+.ed-var b{color:var(--ink);font-weight:500}
+.ed-vars .ed-note{grid-column:1 / -1;margin:3px 0 0}
+.ed-old.below{bottom:auto;top:1.5em}
+.ed.arb .ed-now{color:var(--accent)}
+.ed.arb.no .ed-kept{text-decoration:underline dotted var(--sonar);text-underline-offset:3px}
 
 /* исправления */
 .fx-count{font:12px/1.5 var(--mono);color:var(--ink-dim);margin:0}

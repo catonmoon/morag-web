@@ -6,6 +6,9 @@
 //   1) пики — один раз, когда пришла огибающая;
 //   2) лента голосов — один раз на событие диаризации, с проявлением слева направо;
 //   3) живой слой — на каждый кусок пасса-2 закрашивается ТОЛЬКО его окно.
+//   4) сверка (арбитраж, редактор): полоса внизу — где слушало второе ухо или редактор; точки
+//      над куском — решения (взято · спор оставлен · вето), тики — правки редактора. Наведение
+//      на волну называет решение словами (владелец, 30.09: «максимально наглядно на волне»).
 //
 // ⚠️ Цвета берём из токенов страницы (`--accent`, `--sonar`, `--ink-faint`) и разводим ПОВОРОТОМ
 // тона, а не своей палитрой: окно должно выглядеть продолжением сайта, а не чужой утилитой.
@@ -21,14 +24,21 @@ const SPARKS = 9;             // сколько их сыплется на ка�
 const DIM = 0.62;             // насколько приглушён НЕ пройденный пассом-2 звук
 const AWAY = 0.74;            // насколько уходят чужие голоса, когда один под курсором
 
+/** Коротко, чем решено, — для подсказки над волной (подробно — над словом в тексте). */
+const VERDICT = { "частота": "обычное слово", "канон": "известно записи", "голосование": "два уха из трёх",
+                  "вето": "вето записи", "спорно": "спор" };
+
 export function wave(root) {
   const canvas = el("canvas", { class: "wv-c" });
   // Подсказка «кто говорит» — слоем НАД канвасом: рисовать её в канвасе значило бы верстать
   // текст руками (шрифт, фон, скругление) и перерисовывать волну на каждое движение мыши.
   const tip = el("span", { class: "wv-tip", hidden: true });
   const legend = el("div", { class: "wv-legend" });
+  // Ключ к значкам сверки — появляется, только когда они есть: без подписи точки и полосы на
+  // волне — загадка, а цвет не единственный канал (см. шапку).
+  const key = el("div", { class: "wv-key", hidden: true });
   root.classList.add("wv");   // ориентир для подсказки: `position: relative`
-  root.append(canvas, tip, legend);
+  root.append(canvas, tip, key, legend);
 
   let peaks = null;           // Uint8Array огибающей
   let audioSec = 0;
@@ -46,6 +56,10 @@ export function wave(root) {
   let hoverIdx = -1;          // голос под курсором (с волны или из легенды)
   let hoverSec = null;        // секунда под курсором — только когда курсор на волне
   let sparks = [];            // искры на кромке прогресса: {sec, born, vx, vy, r}
+  let checks = [];           // куски, которые слушало второе ухо: [from, to]
+  let ears = [];             // окна, которые переслушивал редактор: [from, to, ear]
+  let votes = [];            // решения арбитража: {from, to, was, now, clean, by, taken}
+  let edits = [];            // правки редактора и финал-раунда: {sec, ok, was, now}
   let scale = 1;              // плотность экрана: канвас в пикселях устройства, размеры — в CSS
   let dirty = true;
   let raf = null;
@@ -184,11 +198,56 @@ export function wave(root) {
       if (sparks.length) dirty = true;    // ⚠️ кадры просим ТОЛЬКО пока искры живы
     }
 
+    // Сверка: полоса внизу — где слушали второй раз (второе ухо — бирюзой, чистое ухо редактора —
+    // оранжевым), точки над куском — решения арбитража, тики сверху — правки.
+    if (audioSec > 0 && (checks.length || ears.length || votes.length || edits.length)) {
+      const sonar = css("--sonar") || "#57B4A9";
+      const bad = css("--bad") || "#D97B5E";
+      const band = Math.max(3, H * 0.06);
+      ctx.fillStyle = fade(sonar, 0.85);
+      for (const [a, b] of checks) ctx.fillRect((a / audioSec) * W, H - band, Math.max(scale, ((b - a) / audioSec) * W), band);
+      for (const [a, b, ear] of ears) {
+        ctx.fillStyle = ear === "clean" ? fade(accent, 0.9) : fade(sonar, 0.95);
+        ctx.fillRect((a / audioSec) * W, H - band * 2.2, Math.max(scale, ((b - a) / audioSec) * W), band);
+      }
+      const r = 3.2 * scale;
+      for (const v of votes) {
+        const x = (((v.from + v.to) / 2) / audioSec) * W;
+        const y = H - band * 3.4;
+        ctx.beginPath();
+        // ⚠️ Вето — РОМБОМ, а не только цветом: оранжевое «взято» и красное «вето» на тёмной
+        // волне читаются одним цветом (замечено на стенде 30.09).
+        if (v.by === "вето" && !v.taken) {
+          ctx.moveTo(x, y - r * 1.25); ctx.lineTo(x + r * 1.25, y); ctx.lineTo(x, y + r * 1.25); ctx.lineTo(x - r * 1.25, y);
+          ctx.closePath(); ctx.fillStyle = bad; ctx.fill();
+        } else {
+          ctx.arc(x, y, r, 0, Math.PI * 2);
+          if (v.taken) { ctx.fillStyle = accent; ctx.fill(); }
+          else { ctx.strokeStyle = fade(faint, 0.95); ctx.lineWidth = scale; ctx.stroke(); }
+        }
+      }
+      for (const f of edits) {
+        ctx.fillStyle = f.ok ? accent : fade(faint, 0.8);
+        ctx.fillRect(Math.min(W - 1, (f.sec / audioSec) * W), notch + scale, 2 * scale, band * 1.6);
+      }
+    }
+
     // Курсор мыши — тонкой линией: подсказка говорит «кто», линия — «где».
     if (hoverSec != null && audioSec > 0) {
       ctx.fillStyle = fade(css("--ink") || "#E8EEF4", 0.5);
       ctx.fillRect(Math.min(W - 1, (hoverSec / audioSec) * W), 0, scale, H);
     }
+  }
+
+  function showKey() {
+    const items = [];
+    if (checks.length) items.push(["wv-k-band", "слушало второе ухо"]);
+    if (votes.length) items.push(["wv-k-take", "взято"], ["wv-k-keep", "спор оставлен"], ["wv-k-veto", "вето записи"]);
+    if (ears.length) items.push(["wv-k-ear", "переслушивал редактор"]);
+    if (edits.length) items.push(["wv-k-fix", "правка"]);
+    if (!items.length) { key.setAttribute("hidden", ""); return; }
+    key.replaceChildren(...items.map(([cls, text]) => el("span", {}, el("i", { class: cls }), text)));
+    key.removeAttribute("hidden");
   }
 
   function tick() {
@@ -200,6 +259,7 @@ export function wave(root) {
   }
 
   function paint() {
+    showKey();
     dirty = true;
     if (raf === null) raf = requestAnimationFrame(tick);
   }
@@ -228,6 +288,20 @@ export function wave(root) {
     if (known && known.name) return known.name;
     if (known && known.voice) return String(known.voice);
     return label;
+  }
+
+  /** Решения сверки под курсором — словами: «поставил → поставила · два уха из трёх». */
+  function verdictAt(sec) {
+    const near = votes.filter((v) => sec >= v.from - 0.5 && sec <= v.to + 0.5).slice(0, 2).map((v) => {
+      const alt = [v.now, v.clean].filter((w) => w && w !== v.was);
+      const pick = v.taken ? `${v.was} → ${v.now}` : `${v.was} (${alt.join(" / ") || "?"} — не взято)`;
+      return `${pick} · ${VERDICT[v.by] || v.by}`;
+    });
+    const room = Math.max(4, (audioSec || 0) / 400);
+    const fx = edits.filter((f) => Math.abs(f.sec - sec) <= room).slice(0, 1)
+      .map((f) => `${f.was} → ${f.now}${f.ok ? "" : " (отказ)"}`);
+    const all = [...near, ...fx];
+    return all.length ? ` · ${all.join(" · ")}` : "";
   }
 
   /** Какой голос звучит в эту секунду. Отрезков немного (десятки), перебор дешевле индекса. */
@@ -274,9 +348,14 @@ export function wave(root) {
     hoverSec = Math.max(0, Math.min(audioSec || sec, sec));
     hoverIdx = voiceAtSec(hoverSec);
     const label = speakers[hoverIdx];
-    tip.textContent = `${label ? title(label) : "тишина"} · ${clock(hoverSec)}`;
-    if (x != null) tip.style.left = `${Math.max(34, Math.min(width - 34, x))}px`;
-    tip.removeAttribute("hidden");
+    tip.textContent = `${label ? title(label) : "тишина"} · ${clock(hoverSec)}${verdictAt(hoverSec)}`;
+    // Подсказка с решением длинная — держим её ЦЕЛИКОМ внутри волны: у левого края она
+    // обрезалась (стенд 30.09), а середина по курсору уходила за край.
+    tip.removeAttribute("hidden");          // сначала показать: у скрытой подсказки ширина 0
+    if (x != null) {
+      const half = Math.max(34, (tip.offsetWidth || 0) / 2 + 4);
+      tip.style.left = `${Math.max(half, Math.min(width - half, x))}px`;
+    }
     markLegend();
     paint();
   }
@@ -322,6 +401,27 @@ export function wave(root) {
         }
         return;
       }
+      // Сверка: второе ухо, решения, страницы и уши редактора — рисуются поверх той же волны.
+      if (e.t === "arbitrate.chunk") {
+        if (e.heard) checks.push([e.from, e.to]);
+        window_ = [e.from, e.to];
+        cursor = e.to;
+        paint();
+        return;
+      }
+      if (e.t === "arbitrate.swap") {
+        votes.push({ from: e.from, to: e.to, was: e.was, now: e.now, clean: e.clean || "",
+                     by: e.by, taken: Boolean(e.taken) });
+        paint();
+        return;
+      }
+      if (e.t === "editor.page") { window_ = [e.from, e.to]; cursor = e.to; paint(); return; }
+      if (e.t === "editor.listen") { ears.push([e.from, e.to, e.ear]); paint(); return; }
+      if (e.t === "turn.fix") {
+        edits.push({ sec: Number(e.start) || 0, ok: e.ok === true, was: e.was, now: e.now });
+        paint();
+        return;
+      }
       if (e.t === "chunk.start") {
         const idx = Math.max(0, speakers.indexOf(e.spk));
         live.push([e.from, e.to, idx < 0 ? 0 : idx]);
@@ -335,6 +435,7 @@ export function wave(root) {
       peaks = null; audioSec = 0; speakers = []; spans = []; live = []; cursor = null; named = {}; window_ = null;
       revealFrom = 0;
       frames = []; frameAt = null; sparks = [];
+      checks = []; ears = []; votes = []; edits = [];
       hoverIdx = -1; hoverSec = null;
       tip.setAttribute("hidden", "");
       legend.replaceChildren();
@@ -347,6 +448,7 @@ export function wave(root) {
     /** Для тестов и стенда: что сцена считает своим состоянием. */
     state: () => ({ audioSec, speakers, spans: spans.length, live: live.length, cursor,
                     frames: frames.length, frameAt, hoverIdx, hoverSec, tip: tip.textContent,
+                    checks: checks.length, ears: ears.length, votes: votes.length, edits: edits.length,
                     names: speakers.map(title) }),
   };
 }

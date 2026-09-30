@@ -10,6 +10,12 @@
 //      зачёркивается — и сменяется заменой. В тексте остаётся ИСПРАВЛЕННОЕ слово,
 //      написанное оранжевым; прежнее уходит в слой над текстом и всплывает по наведению
 //      вместе с причиной, если она есть. Конец работы — готовая расшифровка, а не лист корректуры.
+//   3) «сверяется» (арбитраж): над спорным словом встают ВСЕ варианты, из которых шёл выбор —
+//      первое ухо, второе, третий голос, — и чем решено; выбранное встаёт в текст. Варианты видны
+//      сами, без наведения (владелец, 30.09: «показывать максимально наглядно»), потом уходят в
+//      слой по наведению, как у правок.
+//   4) редактор: правки те же, что у финал-раунда, плюс свидетель; в шапке — какую страницу он
+//      читает и какое окно переслушивает.
 //
 // ⚠️ Подсветка ОДНА на всю сцену. Разные анимации на разные случаи читаются как рябь: глаз ищет
 // правило и не находит. Правило здесь простое — жёлтым отмечено то, над чем работают ПРЯМО СЕЙЧАС.
@@ -27,6 +33,21 @@ const GAP_MS = 240;        // пауза между правками
 const HELD_MS = 4000;      // человек листает сам — столько за ним не бежим
 const FRESH_MS = 1600;     // сколько прежнее слово видно само, без курсора
 const CUT_MS = 340;        // сколько слово зачёркнуто до того, как его сменит замена
+const VARS_MS = 2600;      // сколько варианты арбитража видны сами — их три-четыре строки, не одно слово
+
+/** Чем решил арбитраж — человеческими словами (ключи — `by` движка). */
+export const BY = {
+  "частота": "второе ухо — обычное слово, первое — нет",
+  "канон": "написание второго уха известно записи",
+  "голосование": "два уха из трёх",
+  "вето": "запись знает прежнее слово — большинство не указ",
+  "спорно": "уши не сошлись — оставлено как было",
+};
+
+/** Свидетель правки редактора. */
+export const WITNESS = { sound: "по звуку", canon: "по канону" };
+
+const EAR = { second: "вторым ухом", clean: "чистым ухом" };
 
 export const WHY = {
   empty: "пусто или ничего не меняет",
@@ -63,8 +84,11 @@ export function textScene(root) {
   let tail = null;           // текстовый узел, в который печатаем
   let anchors = [];          // [[секунда, узел]] — куда листать по времени реплики
   let applied = 0, dropped = 0, turns = 0;
+  let taken = 0, kept = 0;   // решения арбитража: взято / оставлено
+  let edPage = "";           // шапка редактора: какая страница читается
   const jobs = [];
   let busy = 0;
+  let landing = 0;           // кусков, которые ещё встают на место черновика (отложено таймером)
   let raf = null;
   let heldUntil = 0;
 
@@ -135,7 +159,12 @@ export function textScene(root) {
       else more = true;
       toEnd();
     }
-    if (jobs.length && now >= busy) { runJob(jobs.shift(), now); more = true; }
+    // ⚠️⚠️ Правка и решение арбитража ждут, пока ВСЕ отложенные куски не встанут на место: кусок
+    // переписывает свой текст целиком и стёр бы пометку, поставленную раньше него. В видимой
+    // вкладке порядок держат таймеры, но в фоне браузер их придерживает, а решения арбитража
+    // приходят сразу за пассом-2 (поймано на стенде 30.09: счётчик решений рос, пометок — ноль).
+    const blocked = landing > 0 && jobs.length && jobs[0].t !== "chunk";
+    if (jobs.length && now >= busy && !blocked) { runJob(jobs.shift(), now); more = true; }
     if (jobs.length) more = true;
     if (more) pump();
   }
@@ -270,7 +299,47 @@ export function textScene(root) {
 
   function runJob(job, now) {
     if (job.t === "chunk") runChunk(job, now);
+    else if (job.t === "arb") runArb(job, now);
     else runFix(job, now);
+  }
+
+  /** Решение арбитража на слове: подсветка → варианты над словом → выбранное в тексте.
+   *
+   * ⚠️ Варианты — СПИСКОМ строк «чьё ухо — что услышало», а не стрелкой «было → стало»: выбор
+   * идёт из двух-трёх равноправных версий, и стрелка врала бы, будто одна из них — исправление
+   * другой. Первая строка зачёркнута, только если слово действительно заменено.
+   */
+  function runArb(e, now) {
+    finishTyping();
+    if (e.taken) taken += 1; else kept += 1;
+    summary();
+    current = e.from ?? current;
+    const { hold, gap } = pace(jobs.length);
+    const spot = locate(e.was || "");
+    if (!spot) { busy = now + gap; return; }
+    const rest = spot.node.splitText(spot.index);
+    rest.splitText(spot.word.length);
+    const mark = el("span", { class: "tx-hit", text: spot.word });
+    rest.replaceWith(mark);
+    follow(mark);
+    busy = now + hold + gap;
+    const land = () => {
+      const rows = [["1-е ухо", spot.word, e.taken], ["2-е ухо", e.now, false]];
+      if (e.clean) rows.push(["3-й голос", e.clean, false]);
+      const layer = el("span", { class: "ed-old ed-vars" },
+        ...rows.map(([ear, word, gone]) => el("span", { class: "ed-var" },
+          el("span", { class: "ed-ear", text: ear }),
+          gone ? el("s", { class: "ed-gone", text: word }) : el("b", { text: word }))),
+        el("span", { class: "ed-note", text: BY[e.by] || e.by || "" }));
+      const fix = el("span", { class: e.taken ? "ed arb fresh" : "ed arb no fresh" },
+        el("span", { class: e.taken ? "ed-now" : "ed-kept", text: e.taken ? e.now : spot.word }), layer);
+      mark.replaceWith(fix);
+      marks.push(fix);
+      fit(layer);
+      fix.addEventListener("mouseenter", () => fit(layer));   // окно прокрутили — место над словом другое
+      setTimeout(() => fix.classList.remove("fresh"), VARS_MS);
+    };
+    if (reduced()) land(); else setTimeout(land, hold);
   }
 
   /** Чистовой кусок пасса-2 ВСТАЁТ НА МЕСТО чернового (решение владельца 24.09).
@@ -293,7 +362,10 @@ export function textScene(root) {
     spot.classList.add("tx-hit");
     follow(spot);
     busy = now + hold + gap;
+    landing += 1;
     const land = () => {
+      landing = Math.max(0, landing - 1);
+      pump();
       spot.classList.remove("tx-hit");
       const text = `${(job.raw || "").trim()} `;
       if (fresh) {
@@ -343,8 +415,8 @@ export function textScene(root) {
       // очевидному только занимает место. У отвергнутой правки зачёркнута ПРЕДЛОЖЕННАЯ замена
       // (её в тексте нет), а рядом — почему.
       const gone = ok ? spot.word : e.now;
-      const note = ok ? "" : [WHY[e.why] || e.why || "",
-                              e.term ? `«${e.term}»` : ""].filter(Boolean).join(" ");
+      const note = ok ? (WITNESS[e.witness] || "")
+                      : [WHY[e.why] || e.why || "", e.term ? `«${e.term}»` : ""].filter(Boolean).join(" ");
       // ⚠️ Простые `span`, а НЕ `ruby`/`rt`: у `ruby` своя раскладка, а у `inline-block`, которым
       // её приходилось гасить, — своя высота и свои точки переноса: строка с правкой становилась
       // выше соседних, а знак препинания за словом уезжал на следующую. Замена обязана
@@ -370,13 +442,21 @@ export function textScene(root) {
   function fit(node) {
     if (typeof node.getBoundingClientRect !== "function") return;
     node.style.marginLeft = "0px";
-    const over = node.getBoundingClientRect().right - (body.getBoundingClientRect().right - 10);
+    const box = body.getBoundingClientRect();
+    const over = node.getBoundingClientRect().right - (box.right - 10);
     if (over > 0) node.style.marginLeft = `${-over}px`;
+    // Слой вариантов арбитража высокий (три-четыре строки): у верхнего края окна он уходил за край
+    // и терял первую строку — «1-е ухо» (стенд 30.09). Места сверху нет — открываем под словом.
+    node.classList.remove("below");
+    if (node.getBoundingClientRect().top < box.top + 4) node.classList.add("below");
   }
 
   function summary() {
-    count.textContent = applied || dropped
-      ? `принято ${applied} · отброшено ${dropped}${turns ? ` · реплик ${turns}` : ""}` : "";
+    const parts = [];
+    if (taken || kept) parts.push(`второе ухо: взято ${taken} · оставлено ${kept}`);
+    if (applied || dropped) parts.push(`правки: принято ${applied} · отброшено ${dropped}`);
+    if (turns) parts.push(`реплик ${turns}`);
+    count.textContent = parts.join(" · ");
   }
 
   return {
@@ -422,6 +502,31 @@ export function textScene(root) {
         if (drafts()) { jobs.push(job); pump(); } else { runChunk(job, performance.now()); }
         return;
       }
+      if (e.t === "stage.start" && e.stage === "arbitrate") {
+        root.removeAttribute("hidden");
+        mode = "arbitrating";
+        head.textContent = "сверяю вторым ухом — над словом все варианты, выбранное оранжевым";
+        return;
+      }
+      if (e.t === "arbitrate.chunk") { current = e.from ?? current; return; }
+      if (e.t === "arbitrate.swap") { jobs.push({ ...e, t: "arb" }); pump(); return; }
+      if (e.t === "stage.start" && e.stage === "editor") {
+        root.removeAttribute("hidden");
+        mode = "fixing";
+        edPage = "";
+        head.textContent = "редактор перечитывает страницы — исправленное оранжевым; наведите, чтобы увидеть прежнее";
+        return;
+      }
+      // Шапка редактора: какую страницу читает и где сомневается (что переслушивает и каким ухом).
+      if (e.t === "editor.page") {
+        edPage = `редактор · страница ${(e.page ?? 0) + 1} из ${e.of} (${clock(e.from)}–${clock(e.to)})`;
+        head.textContent = edPage;
+        return;
+      }
+      if (e.t === "editor.listen") {
+        head.textContent = `${edPage || "редактор"} · переслушивает ${clock(e.from)}–${clock(e.to)} ${EAR[e.ear] || ""}`.trim();
+        return;
+      }
       if (e.t === "stage.start" && e.stage === "final-round") {
         root.removeAttribute("hidden");
         mode = "fixing";
@@ -449,14 +554,16 @@ export function textScene(root) {
       }
     },
     reset() {
-      mode = "idle"; pending = ""; typed = 0; tail = null; jobs.length = 0; busy = 0;
+      mode = "idle"; pending = ""; typed = 0; tail = null; jobs.length = 0; busy = 0; landing = 0;
       speakers = []; named = {}; badges = []; lastSpk = null; chunk = null; toTop = false;
       applied = dropped = turns = current = 0;
+      taken = kept = 0; edPage = "";
       marks = []; anchors = [];
       head.textContent = ""; body.replaceChildren(); count.textContent = "";
       root.setAttribute("hidden", "");
     },
-    state: () => ({ mode, applied, dropped, turns, text: body.textContent, speakers: badges.length,
+    state: () => ({ mode, applied, dropped, turns, taken, kept, head: head.textContent,
+                    text: body.textContent, speakers: badges.length,
                     edits: marks.length, queued: jobs.length }),
   };
 }
