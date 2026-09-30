@@ -677,4 +677,43 @@ const { sendScene, size } = await import(join(repo, "tools/ui/send.js"));
   assert.equal(scene.state().live, 1); assert.equal(scene.state().cursor, 120, "страница редактора загорелась");
 }
 
+
+{
+  // Экран разобран — сцена уходит, место отдаётся тексту (владелец, 30.09).
+  const root = new El("div");
+  const scene = screenScene(root, { frameUrl: (x) => x });
+  scene.apply({ t: "client.step", step: "screen", lane: "side", say: "разбираю" });
+  assert.equal(root.attrs.hidden, undefined, "идёт разбор — сцена видна");
+  scene.apply({ t: "client.step", step: "screen", lane: "side", say: "экран разобран", done: true });
+  assert.equal(root.attrs.hidden, "", "разобран — спрятана");
+  scene.apply({ t: "screen.frame", sec: 10, kind: "slide", n: 1, done: 1 });
+  assert.equal(root.attrs.hidden, "", "поздний кадр её не возвращает");
+}
+{
+  // Клик по волне и слежение по видимости фронта (владелец, 30.09): фронт не виден — читаем,
+  // окно не дёргается; вернулись к фронту — снова следим.
+  const root = new El("div");
+  const scene = textScene(root);
+  const body = root.children.find((n) => n.classList.contains("tx-body"));
+  body.getBoundingClientRect = () => ({ top: 0, bottom: 200, left: 0 });
+  scene.apply({ t: "stage.start", stage: "pass1" });
+  for (let i = 0; i < 6; i++) scene.apply({ t: "draft.window", from: i * 30, to: i * 30 + 30, text: `кусок ${i}` });
+  scene.apply({ t: "stage.start", stage: "pass2" });
+  const pieces = body.children.filter((n) => n.classList.contains("tx-piece"));
+  // фронт — последний кусок, «далеко внизу»; первые куски — «в окне»
+  pieces.forEach((n, i) => { n.getBoundingClientRect = () => ({ top: i * 100 - body.scrollTop, bottom: i * 100 + 20 - body.scrollTop }); n.offsetTop = i * 100; });
+  scene.apply({ t: "chunk.start", i: 6, n: 6, from: 155, to: 180, spk: "S0" });
+  scene.apply({ t: "chunk.done", i: 6, raw: "чистовик последнего куска" });
+  flush(20);
+  scene.seek(0);
+  assert.equal(scene.state().following, false, "ушли к началу, фронт внизу не виден — читаем");
+  const before = body.scrollTop;
+  scene.apply({ t: "chunk.start", i: 6, n: 6, from: 155, to: 180, spk: "S0" });
+  scene.apply({ t: "chunk.done", i: 6, raw: "ещё чистовик" });
+  flush(20);
+  assert.equal(body.scrollTop, before, "окно не уехало от читающего");
+  scene.seek(160);
+  assert.equal(scene.state().following, true, "вернулись к фронту — снова следим");
+}
+
 console.log("ok upload-scenes");

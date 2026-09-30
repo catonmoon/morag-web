@@ -93,6 +93,8 @@ import { wave } from "./wave.js";
 const id = (x) => document.getElementById(x);
 const scenes = { wave: wave(id("scene-wave")), text: textScene(id("scene-text")),
                  screen: screenScene(id("scene-screen")), send: sendScene(id("scene-send")) };
+// Клик по волне — текст к этой секунде.
+scenes.wave.onSeek((sec) => scenes.text.seek(sec));
 let trace = [];
 let at = 0;
 let timer = null;

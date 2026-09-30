@@ -377,6 +377,14 @@ export function wave(root) {
     hoverSecond((x / (box.width || 1)) * audioSec, x, box.width || 0);
   });
   canvas.addEventListener("mouseleave", () => hoverSecond(null));
+  // Клик по волне — перемотать ТЕКСТ к этой секунде (владелец, 30.09). Сама волна не знает
+  // про текст: она лишь сообщает секунду тому, кто подписался.
+  let seekTo = null;
+  canvas.addEventListener("click", (e) => {
+    if (!audioSec || !seekTo) return;
+    const box = canvas.getBoundingClientRect();
+    seekTo(((e.clientX - box.left) / (box.width || 1)) * audioSec);
+  });
 
   return {
     /** Одно событие меняет состояние сцены; рисование — отдельно и по кадрам. */
@@ -473,6 +481,8 @@ export function wave(root) {
       paint();
     },
     fit,
+    /** Подписка на клик по волне: `fn(секунда)`. */
+    onSeek(fn) { seekTo = fn; },
     /** Наведение снаружи — для стенда и тестов: канваса с мышью там нет. */
     hoverSecond,
     hoverVoice,

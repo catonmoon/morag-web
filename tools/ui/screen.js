@@ -18,6 +18,7 @@ export function screenScene(root, { frameUrl = null } = {}) {
   root.append(head, el("div", { class: "sc-row" }, shot, side), count);
 
   let done = 0;
+  let finished = false;      // разбор экрана закончен — сцена спрятана
   let total = 0;
   let bad = 0;
 
@@ -53,15 +54,24 @@ export function screenScene(root, { frameUrl = null } = {}) {
 
   return {
     apply(e) {
+      // Экран разобран — сцена уходит и отдаёт место тексту (владелец, 30.09): дальше смотреть
+      // в ней нечего, а текст правится ещё долго.
+      if (e.t === "client.step" && e.step === "screen" && e.done) {
+        finished = true;
+        root.setAttribute("hidden", "");
+        return;
+      }
       if (e.t === "client.step" && (e.step === "screen" || e.step === "slides")) {
+        finished = false;
         root.removeAttribute("hidden");
         head.textContent = "разбираю экран — что было на мониторе в эту секунду";
         return;
       }
-      if (e.t === "screen.frame") { root.removeAttribute("hidden"); show(e); }
+      if (e.t === "screen.frame") { if (!finished) root.removeAttribute("hidden"); show(e); }
     },
     reset() {
       done = total = bad = 0;
+      finished = false;
       head.textContent = "";
       shot.replaceChildren();
       side.replaceChildren();

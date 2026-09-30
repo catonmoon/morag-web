@@ -36,6 +36,8 @@ let videos = [];
 // --- показ работы -----------------------------------------------------------------------------
 
 const scenes = { wave: wave(id("scene-wave")), text: textScene(id("scene-text")), screen: screenScene(id("scene-screen"), { frameUrl: (p) => `/api/frame?path=${encodeURIComponent(p)}&t=${encodeURIComponent(T)}` }), send: sendScene(id("scene-send")) };
+// Клик по волне — текст к этой секунде.
+scenes.wave.onSeek((sec) => scenes.text.seek(sec));
 const queue = [];        // события, пришедшие, но ещё не показанные
 let cursor = 0;
 let noEvents = false;    // старый адаптер/сервер без ленты — падаем обратно на лог

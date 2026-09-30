@@ -138,6 +138,11 @@ button.icon{background:none;border:1px solid var(--line);color:var(--ink-dim);pa
 .tx-body{font:17px/2.05 var(--serif);color:var(--ink);margin:0 0 12px;
          height:clamp(260px,52vh,560px);overflow-y:auto;overflow-x:hidden;overflow-wrap:anywhere;
          background:var(--surface-2);border-radius:12px;padding:16px 18px}
+/* Экран разобран и спрятан — текст забирает его место (владелец, 30.09). */
+[id=scene-screen][hidden] ~ [id=scene-text] .tx-body{height:clamp(320px,70vh,860px)}
+/* Куда перемотал клик по волне — короткая подсветка, чтобы глаз нашёл место. */
+.tx-seek{background:var(--accent-wash);border-radius:4px;transition:background .6s ease-out}
+.wv-c{cursor:pointer}
 .tx-piece{display:inline}
 /* Черновик пасса-1 — приглушённый: видно, что этот кусок ещё будет уточнён. Чистовик
    встаёт на его место и пометка снимается — весь смысл второго прохода виден глазом. */

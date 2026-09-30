@@ -33,7 +33,7 @@ import { colour } from "./voices.js";
 const TYPE_MS = 900;       // за столько печатается кусок, если не торопимся
 const HOLD_MS = 460;       // сколько слово подсвечено до замены — время заметить глазом
 const GAP_MS = 240;        // пауза между правками
-const HELD_MS = 4000;      // человек листает сам — столько за ним не бежим
+const LOOK_MS = 160;       // после жеста человека — через столько смотрим, виден ли фронт работы
 const FRESH_MS = 1600;     // сколько прежнее слово видно само, без курсора
 const CUT_MS = 340;        // сколько слово зачёркнуто до того, как его сменит замена
 const DWELL_MS = 900;      // сколько правка остаётся в кадре ПОСЛЕ замены, прежде чем окно уйдёт к следующей
@@ -104,7 +104,14 @@ export function textScene(root) {
   let busy = 0;
   let landing = 0;           // кусков, которые ещё встают на место черновика (отложено таймером)
   let raf = null;
-  let heldUntil = 0;
+  // ⚠️⚠️ Слежение — по ВИДИМОСТИ ФРОНТА, а не по таймеру (владелец, 30.09): «если перемотались
+  // туда, где виден фронт работы, — следим за ним; если нет — просто читаем». Фронт — узел, над
+  // которым сцена работает прямо сейчас (печатаемый кусок, подсвеченное слово). Человек ушёл
+  // жестом или кликом по волне туда, где фронта не видно, — окно больше не дёргается; вернулся
+  // к нему — снова ведёт. Прежний таймер «4 с не бежим за человеком» возвращал окно через
+  // четыре секунды посреди чтения.
+  let following = true;
+  let front = null;
 
   // ⚠️⚠️ «Человек листает сам» берём из ЕГО ЖЕСТОВ, а не из события `scroll`. Событие поднимает
   // и наша собственная прокрутка, и сам браузер — подстановка корректуры меняет высоту строки
@@ -112,8 +119,14 @@ export function textScene(root) {
   // слежение выключалось САМО себя после первой же замены, и корректура ложилась за краем окна
   // (замерено на стенде: 2 корректуры в тексте, ни одной в видимой части). Тот же приём, что
   // в читалке сайта (`web/js/records/reader.js`), и по той же причине.
+  let lookTimer = null;
+  function look() {
+    // Решаем после того, как прокрутка от жеста состоялась: сам жест приходит до неё.
+    if (lookTimer) clearTimeout(lookTimer);
+    lookTimer = setTimeout(() => { lookTimer = null; following = frontVisible(); }, LOOK_MS);
+  }
   for (const type of ["wheel", "touchmove", "keydown"]) {
-    body.addEventListener(type, () => { heldUntil = performance.now() + HELD_MS; }, { passive: true });
+    body.addEventListener(type, () => { following = false; look(); }, { passive: true });
   }
 
   function pump() { if (raf === null) raf = requestAnimationFrame(tick); }
@@ -138,14 +151,23 @@ export function textScene(root) {
    * строк, и самое свежее (то, ради чего смотрят) оказывалось ниже края. Здесь нужно
    * поведение ленты: новое приходит снизу, окно его догоняет.
    */
+  /** Виден ли фронт работы в окне текста (хоть краем). Фронта нет — считаем, что виден. */
+  function frontVisible() {
+    if (!front || front.isConnected === false) return true;   // фронта нет или он заменён
+    if (typeof front.getBoundingClientRect !== "function" || typeof body.getBoundingClientRect !== "function") return true;
+    const f = front.getBoundingClientRect(), b = body.getBoundingClientRect();
+    return f.bottom >= b.top && f.top <= b.bottom;
+  }
+
   function toEnd() {
-    if (performance.now() < heldUntil) return;
+    if (!following) return;
     body.scrollTop = body.scrollHeight;
   }
 
   function follow(node) {
     // ⚠️ Без behavior:"smooth" — см. шапку файла.
-    if (!node || performance.now() < heldUntil) return;
+    if (node) front = node;
+    if (!node || !following) return;
     body.scrollTop = Math.max(0, offsetIn(node) - body.clientHeight * 0.45);
   }
 
@@ -215,6 +237,7 @@ export function textScene(root) {
     body.append(piece);
     anchors.push([sec, piece]);
     tail = piece;
+    front = piece;
     pending = (raw || "").trim() + " ";
     typed = 0;
     toEnd();          // кусок уже в разметке — показываем конец сразу, а не со следующего кадра
@@ -635,6 +658,7 @@ export function textScene(root) {
     },
     reset() {
       mode = "idle"; pending = ""; typed = 0; tail = null; jobs.length = 0; busy = 0; landing = 0;
+      following = true; front = null;
       speakers = []; named = {}; badges = []; lastSpk = null; chunk = null; toTop = false;
       applied = dropped = turns = current = 0;
       taken = kept = 0; edPage = ""; heard = back = 0;
@@ -642,7 +666,17 @@ export function textScene(root) {
       head.textContent = ""; body.replaceChildren(); count.textContent = "";
       root.setAttribute("hidden", "");
     },
-    state: () => ({ mode, applied, dropped, turns, taken, kept, heard, back, head: head.textContent,
+    /** Клик по волне: текст — к этой секунде. Фронт работы там виден — слежение продолжается,
+     *  нет — человек читает, и окно его не дёргает, пока он сам не вернётся к фронту. */
+    seek(sec) {
+      const node = near(Number(sec) || 0) || windowAt(Number(sec) || 0);
+      if (!node) return;
+      body.scrollTop = Math.max(0, offsetIn(node) - body.clientHeight * 0.2);
+      node.classList.add("tx-seek");
+      setTimeout(() => node.classList.remove("tx-seek"), 1200);
+      following = frontVisible();
+    },
+    state: () => ({ mode, applied, dropped, turns, taken, kept, heard, back, following, head: head.textContent,
                     text: body.textContent, speakers: badges.length,
                     edits: marks.length, queued: jobs.length }),
   };
