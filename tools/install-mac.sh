@@ -44,6 +44,10 @@ step() { printf '\n\033[1m[%s/%s] %s\033[0m\n' "$1" "$STEPS" "$2"; }
 # бы выкачать их второй раз. Переносим и снимок сессии — иначе приложение забудет, что вошло.
 if [ ! -d "$ROOT" ] && [ -d "$HOME/morag-ingest" ]; then
   mv "$HOME/morag-ingest" "$ROOT" && printf '\033[32m  ✓ старая установка перенесена: ~/morag-ingest → %s\033[0m\n' "$ROOT"
+  # ⚠️ Окружения питона НЕ переносятся: в их bin/ абсолютные ссылки на прежний каталог, и после
+  # переезда интерпретатор мёртв (живая установка 30.09 упала ровно на этом). Модели переезжают,
+  # окружения собираются заново.
+  rm -rf "$ROOT/asr-stack/venvs"
 fi
 if [ ! -d "$HOME/.morag-upload" ] && [ -d "$HOME/.morag-ingest" ]; then
   mv "$HOME/.morag-ingest" "$HOME/.morag-upload"
@@ -188,8 +192,9 @@ retry_pip env ASR_STACK_ENV="$ENV_FILE" ASR_STACK_HOME="$STACK" MORAG_REPO="$ROO
   bash "$ROOT/morag/services/asr-adaptor/deploy/mac/install.sh" \
   || die "не собрался стек транскрибации — напишите тому, кто дал ссылку, и покажите последние строки"
 VIDEO="$STACK/video-venv"
-if [ ! -x "$VIDEO/bin/python" ]; then
-  "$PY" -m venv "$VIDEO"
+# «Есть» — интерпретатор, который запускается: после переезда каталога ссылка в bin/ мертва.
+if ! { [ -x "$VIDEO/bin/python" ] && "$VIDEO/bin/python" -c '' 2>/dev/null; }; then
+  "$PY" -m venv --clear "$VIDEO"
   retry_pip "$VIDEO/bin/pip" install -q --upgrade pip wheel
 fi
 retry_pip "$VIDEO/bin/pip" install -q -r "$ROOT/web/tools/requirements-video.txt" \
