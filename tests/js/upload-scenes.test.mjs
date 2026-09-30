@@ -658,4 +658,23 @@ const { sendScene, size } = await import(join(repo, "tools/ui/send.js"));
                                            `правка реплики ${i + 1} легла в неё же`));
 }
 
+
+{
+  // Владелец 30.09: «процесса не видно, пользователь думает, что всё зависло». Сверка идёт по волне
+  // как пасс-2: на старте стадии волна гаснет, кусок за куском загорается, кромка движется.
+  const scene = wave(new El("div"));
+  scene.apply({ t: "job.meta", audio_sec: 120 });
+  scene.apply({ t: "chunk.start", i: 1, n: 2, from: 0, to: 60, spk: "S0" });
+  scene.apply({ t: "chunk.start", i: 2, n: 2, from: 60, to: 120, spk: "S0" });
+  assert.equal(scene.state().live, 2, "пасс-2 прошёл всё");
+  scene.apply({ t: "stage.start", stage: "arbitrate" });
+  assert.equal(scene.state().live, 0, "сверка начинает проход заново — волна гаснет");
+  scene.apply({ t: "arbitrate.chunk", done: 1, n: 2, from: 0, to: 60, heard: true, flags: ["x"] });
+  assert.equal(scene.state().live, 1); assert.equal(scene.state().cursor, 60, "кромка движется за сверкой");
+  scene.apply({ t: "stage.start", stage: "editor" });
+  scene.apply({ t: "editor.page", page: 0, of: 1, from: 0, to: 120 });
+  scene.apply({ t: "editor.done", page: 0, done: 1, of: 1, proposed: 0, accepted: 0 });
+  assert.equal(scene.state().live, 1); assert.equal(scene.state().cursor, 120, "страница редактора загорелась");
+}
+
 console.log("ok upload-scenes");

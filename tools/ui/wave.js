@@ -60,6 +60,8 @@ export function wave(root) {
   let ears = [];             // окна, которые переслушивал редактор: [from, to, ear]
   let votes = [];            // решения арбитража: {from, to, was, now, clean, by, taken}
   let edits = [];            // правки редактора и финал-раунда: {sec, ok, was, now}
+  let pass = "";             // какой проход идёт по волне: "" (пасс-2) · "arbitrate" · "editor"
+  let pages = {};            // страницы редактора: номер → [from, to]
   let scale = 1;              // плотность экрана: канвас в пикселях устройства, размеры — в CSS
   let dirty = true;
   let raf = null;
@@ -117,6 +119,14 @@ export function wave(root) {
       for (let i = Math.max(0, Math.floor(at(a))); i < Math.min(n, Math.ceil(at(b))); i++) heard[i] = 1;
     }
 
+    // Сверка вторым ухом: куски, которые оно слушало, — бирюзовой подложкой во всю высоту.
+    // ⚠️ Тонкой полосы внизу было мало: владелец, 30.09 — «процесса не видно, пользователь думает,
+    // что всё зависло». Теперь сверка идёт по волне так же, как пасс-2: волна гаснет на старте
+    // стадии и загорается кусок за куском, а слушанное вторым ухом ещё и подложено цветом.
+    if (checks.length && audioSec > 0) {
+      ctx.fillStyle = fade(css("--sonar") || "#57B4A9", 0.26);
+      for (const [a, b] of checks) ctx.fillRect((a / audioSec) * W, 0, Math.max(scale, ((b - a) / audioSec) * W), H);
+    }
     // Текущий кусок — подложкой, чтобы было видно даже на тихом месте.
     if (window_ && audioSec > 0) {
       const x0 = (window_[0] / audioSec) * W;
@@ -210,7 +220,7 @@ export function wave(root) {
         ctx.fillStyle = ear === "clean" ? fade(accent, 0.9) : fade(sonar, 0.95);
         ctx.fillRect((a / audioSec) * W, H - band * 2.2, Math.max(scale, ((b - a) / audioSec) * W), band);
       }
-      const r = 3.2 * scale;
+      const r = 4.6 * scale;
       for (const v of votes) {
         const x = (((v.from + v.to) / 2) / audioSec) * W;
         const y = H - band * 3.4;
@@ -265,10 +275,10 @@ export function wave(root) {
   }
 
   /** Искры на кромке: сыплются на каждый новый кусок пасса-2 и гаснут за полсекунды. */
-  function spawnSparks(sec) {
+  function spawnSparks(sec, k = 1) {
     if (reduced() || !Number.isFinite(sec)) return;
     const now = performance.now();
-    for (let i = 0; i < SPARKS; i++) {
+    for (let i = 0; i < SPARKS * k; i++) {
       const a = (Math.random() - 0.5) * Math.PI;       // веером вперёд, по ходу распознавания
       sparks.push({ sec, born: now, r: 1.1 + Math.random() * 1.4,
                     vx: Math.cos(a) * (0.12 + Math.random() * 0.42),
@@ -401,11 +411,23 @@ export function wave(root) {
         }
         return;
       }
+      // Новый проход по волне (сверка, редактор): волна гаснет и загорается заново по ходу
+      // прохода — тот же язык, что у пасса-2, поэтому движение видно сразу.
+      if (e.t === "stage.start" && (e.stage === "arbitrate" || e.stage === "editor")) {
+        pass = e.stage;
+        live = [];
+        window_ = null;
+        cursor = 0;
+        paint();
+        return;
+      }
       // Сверка: второе ухо, решения, страницы и уши редактора — рисуются поверх той же волны.
       if (e.t === "arbitrate.chunk") {
         if (e.heard) checks.push([e.from, e.to]);
+        live.push([e.from, e.to, voiceAtSec((e.from + e.to) / 2)]);
         window_ = [e.from, e.to];
         cursor = e.to;
+        spawnSparks(e.to, e.heard ? 2 : 1);
         paint();
         return;
       }
@@ -415,7 +437,16 @@ export function wave(root) {
         paint();
         return;
       }
-      if (e.t === "editor.page") { window_ = [e.from, e.to]; cursor = e.to; paint(); return; }
+      if (e.t === "editor.page") {
+        pages[e.page] = [e.from, e.to];
+        window_ = [e.from, e.to]; cursor = e.from; paint(); return;
+      }
+      if (e.t === "editor.done") {
+        const pg = pages[e.page];
+        if (pg) { live.push([pg[0], pg[1], voiceAtSec((pg[0] + pg[1]) / 2)]); cursor = pg[1]; spawnSparks(pg[1], 2); }
+        paint();
+        return;
+      }
       if (e.t === "editor.listen") { ears.push([e.from, e.to, e.ear]); paint(); return; }
       if (e.t === "turn.fix") {
         edits.push({ sec: Number(e.start) || 0, ok: e.ok === true, was: e.was, now: e.now });
@@ -435,7 +466,7 @@ export function wave(root) {
       peaks = null; audioSec = 0; speakers = []; spans = []; live = []; cursor = null; named = {}; window_ = null;
       revealFrom = 0;
       frames = []; frameAt = null; sparks = [];
-      checks = []; ears = []; votes = []; edits = [];
+      checks = []; ears = []; votes = []; edits = []; pass = ""; pages = {};
       hoverIdx = -1; hoverSec = null;
       tip.setAttribute("hidden", "");
       legend.replaceChildren();
@@ -449,6 +480,7 @@ export function wave(root) {
     state: () => ({ audioSec, speakers, spans: spans.length, live: live.length, cursor,
                     frames: frames.length, frameAt, hoverIdx, hoverSec, tip: tip.textContent,
                     checks: checks.length, ears: ears.length, votes: votes.length, edits: edits.length,
+                    pass,
                     names: speakers.map(title) }),
   };
 }
