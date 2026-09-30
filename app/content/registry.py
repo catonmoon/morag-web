@@ -27,6 +27,12 @@ L2-нормированных векторов, максимум по ВСЕМ �
 Короткий голос (`air < short_air_sec`) помечается в реестре `short: true` — он остаётся честным
 участником записи, но верстак может не показывать такие в общем списке.
 
+⚠️ **Два голоса ОДНОЙ записи — один номер, только если они похожи и друг на друга.** Диаризатор
+их развёл, значит слышит разных людей; если оба похожи на третий голос корпуса (центроид «между»
+ними), без проверки они получали один номер — и диалог двух ведущих становился монологом.
+Второй голос тогда ищется среди прочих, а не нашёлся — получает новый номер
+(`record_guard`, по умолчанию включено; то же правило в движке — `ASR_REGISTRY_RECORD_GUARD`).
+
 ⚠️ **Битый файл реестра — отказ вслух.** В движке на этом месте `except → пустой реестр`, и файл
 перезаписывается: для машинного состояния это терпимо, для корпуса — катастрофа, потому что
 номера начнутся с нуля и подпишут не тех (о чём предупреждает `_registry_warning` в словаре
@@ -138,7 +144,8 @@ def best_match(centroid: list[float], speakers: dict) -> tuple[str | None, float
 
 def identify(path: Path, voices: dict, *, episode: str = "", threshold: float = 0.75,
              suspect: float = 0.65, short_air_sec: float = 15.0,
-             max_centroids: int = 8, dry: bool = False) -> tuple[dict, list[dict]]:
+             max_centroids: int = 8, dry: bool = False,
+             record_guard: bool = True) -> tuple[dict, list[dict]]:
     """Узнать голоса записи и завести незнакомые. Возвращает карту меток и отчёт по каждому.
 
     `voices` — `{метка: {"centroid": [...], "air_sec": 701.3, "cluster": "SPEAKER_00"}}`; метки
@@ -158,11 +165,22 @@ def identify(path: Path, voices: dict, *, episode: str = "", threshold: float = 
     with locked(path):
         reg = load(path)
         speakers = reg["speakers"]
+        here: dict[str, list[list[float]]] = {}   # номера, уже отданные голосам этой записи
+
+        def like_here(c, sid) -> float:
+            return max(cosine(c, x) for x in here[sid])
+
         for label in order:
             item = voices[label] or {}
             centroid = _unit(item.get("centroid"))
             air = float(item.get("air_sec") or 0)
             near, cos = best_match(centroid, speakers)
+            separated = False
+            if record_guard and near in here and like_here(centroid, near) < threshold:
+                near, cos = best_match(centroid, {k: v for k, v in speakers.items()
+                                                  if k not in here
+                                                  or like_here(centroid, k) >= threshold})
+                separated = True
             prov = {"episode": episode or "upload", "cluster": item.get("cluster") or label,
                     "air_sec": round(air, 1), "added": stamp, "identified": True}
             similar = ""
@@ -192,6 +210,9 @@ def identify(path: Path, voices: dict, *, episode: str = "", threshold: float = 
             if similar:
                 row["similar_to"] = similar
                 row["similar_name"] = (speakers.get(near) or {}).get("name", "")
+            if separated:
+                row["separated"] = True   # похож на голос, уже отданный другому голосу записи
+            here.setdefault(sid, []).append(centroid)
             report.append(row)
         if not dry:
             save(path, reg)

@@ -132,6 +132,33 @@ def test_a_long_stranger_becomes_a_new_voice(tmp_path):
     assert "short" not in json.loads(path.read_text(encoding="utf-8"))["speakers"]["1"]
 
 
+def test_two_different_voices_of_one_record_do_not_share_a_number(tmp_path):
+    """Диалог двух ведущих: оба похожи на голос корпуса «между ними», друг на друга — нет."""
+    path = tmp_path / "reg.json"
+    a, b = vec(1), vec(2)
+    registry.identify(path, voices(Speaker_0=(mix(a, b, 0.5), 900)), episode="rec-1")
+    mapping, report = registry.identify(path, voices(Speaker_5=(a, 900), Speaker_6=(b, 600)),
+                                        episode="rec-2", threshold=0.7, suspect=0.6)
+    assert mapping == {"Speaker_5": "Speaker_0", "Speaker_6": "Speaker_1"}
+    assert report[1]["separated"] and report[1]["how"] == "new"
+
+    # без защиты — прежняя склейка (закрепляем, что именно её и лечим)
+    path2 = tmp_path / "reg2.json"
+    registry.identify(path2, voices(Speaker_0=(mix(a, b, 0.5), 900)), episode="rec-1")
+    glued, _ = registry.identify(path2, voices(Speaker_5=(a, 900), Speaker_6=(b, 600)),
+                                 episode="rec-2", threshold=0.7, suspect=0.6, record_guard=False)
+    assert set(glued.values()) == {"Speaker_0"}
+
+
+def test_one_person_split_by_the_diarizer_keeps_one_number(tmp_path):
+    path = tmp_path / "reg.json"
+    a = vec(1)
+    registry.identify(path, voices(Speaker_0=(a, 900)), episode="rec-1")
+    mapping, _ = registry.identify(path, voices(Speaker_5=(a, 900), Speaker_6=(mix(a, vec(3), 0.1), 60)),
+                                   episode="rec-2")
+    assert set(mapping.values()) == {"Speaker_0"}
+
+
 def test_a_preview_changes_nothing_at_all(tmp_path):
     """⚠️ Предпросмотр не смеет занимать номера. Ловилось на живой перенумерации 24.09: «покажи
     карту» зарегистрировало четыре голоса записи, которую ещё не решили трогать, и следующий
