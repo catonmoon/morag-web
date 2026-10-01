@@ -44,6 +44,36 @@ def available() -> bool:
     return True
 
 
+def main_menu():
+    """Главное меню окна: без меню «Правка» Cmd-C / Cmd-V / Cmd-A в веб-виде НЕ работают.
+
+    ⚠️ Так устроен macOS: сочетание клавиш доходит до поля ввода через пункт меню с этим
+    сочетанием и действием (`paste:` и т. п.); у голого `NSApplication` меню нет, и вставить можно
+    было только мышкой из контекстного меню (владелец, 01.10). «Завершить» (Cmd-Q) не заводим: он
+    прошёл бы мимо вопроса «запись ещё обрабатывается» — закрытие окна (Cmd-W) спросит.
+    """
+    from Cocoa import NSMenu, NSMenuItem
+
+    bar = NSMenu.alloc().init()
+
+    def submenu(title: str, items) -> None:
+        holder = NSMenuItem.alloc().init()
+        menu = NSMenu.alloc().initWithTitle_(title)
+        for item in items:
+            if item is None:
+                menu.addItem_(NSMenuItem.separatorItem())
+            else:
+                menu.addItemWithTitle_action_keyEquivalent_(*item)
+        holder.setSubmenu_(menu)
+        bar.addItem_(holder)
+
+    submenu(TITLE, [("Скрыть", "hide:", "h"), None, ("Закрыть окно", "performClose:", "w")])
+    submenu("Правка", [("Отменить", "undo:", "z"), ("Повторить", "redo:", "Z"), None,
+                       ("Вырезать", "cut:", "x"), ("Копировать", "copy:", "c"),
+                       ("Вставить", "paste:", "v"), ("Выделить всё", "selectAll:", "a")])
+    return bar
+
+
 def run(port: int = 8099) -> int:
     import objc
     from Cocoa import (NSApplication, NSApplicationActivationPolicyRegular, NSAlert, NSBackingStoreBuffered,
@@ -111,6 +141,7 @@ def run(port: int = 8099) -> int:
 
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
+    app.setMainMenu_(main_menu())
     style = (NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
              | NSWindowStyleMaskResizable)
     window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
