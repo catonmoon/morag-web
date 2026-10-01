@@ -487,7 +487,7 @@ def test_voices_are_asked_right_after_diarization_not_after_the_whole_run(tmp_pa
                                                      {"SPEAKER_00": {"centroid": [0.0] * 192,
                                                                      "air_sec": 30.0}}))
     monkeypatch.setattr(upload, "identify_voices",
-                        lambda work, site, cookies, episode: {"SPEAKER_00": {"voice": "Speaker_7",
+                        lambda work, site, cookies, episode, **kw: {"SPEAKER_00": {"voice": "Speaker_7",
                                                                             "name": "Нина Ковалёва",
                                                                             "air": 30.0}})
     work = tmp_path / "rec"
@@ -500,4 +500,8 @@ def test_voices_are_asked_right_after_diarization_not_after_the_whole_run(tmp_pa
     assert set(seen) == {"SPEAKER_00", "SPEAKER_01"}, "спаны разобраны по меткам"
     assert seen["SPEAKER_00"]["air_sec"] == 30.0, "эфир сложен по отрезкам"
     assert out["SPEAKER_00"]["name"] == "Нина Ковалёва", "имя узнано до конца расшифровки"
-    assert (work / "voices.json").is_file(), "отпечатки легли рядом — второй раз их не считают"
+    # ⚠️⚠️ Ранние отпечатки — в СВОЙ файл: они с метками диаризатора, а сервер сопоставляет карту с
+    # метками ТЕКСТА. Лёжа в `voices.json`, они отменяли финальный подсчёт, и доклад с ведущим
+    # приезжал одним человеком (01.10).
+    assert (work / upload.EARLY_PRINTS).is_file(), "ранние отпечатки легли рядом — для показа"
+    assert not (work / "voices.json").is_file(), "…но не под именем, которое едет на сервер"

@@ -10,6 +10,10 @@
 
 import { clock, el } from "./dom.js";
 
+/** Что на кадре — словами человека (ключи — `kind` разбора экрана). Нужно и слою над текстом. */
+export const KIND = { slide: "слайд", app: "окно программы", browser: "браузер",
+                      terminal: "терминал", people: "люди в кадре", other: "экран" };
+
 export function screenScene(root, { frameUrl = null } = {}) {
   const head = el("p", { class: "tx-head" });
   const shot = el("div", { class: "sc-shot" });
@@ -19,6 +23,10 @@ export function screenScene(root, { frameUrl = null } = {}) {
 
   let done = 0;
   let finished = false;      // разбор экрана закончен — сцена спрятана
+  // ⚠️⚠️ Пошёл текст — сцена уходит НАСОВСЕМ (владелец, 01.10): кадр дальше показывается слоем
+  // над текстом своей секунды (`text.js`). Сцена нужна лишь первые минуты — звук и диаризация, —
+  // пока текста нет вовсе и показать «что было на мониторе» больше негде.
+  let texted = false;
   let total = 0;
   let bad = 0;
 
@@ -45,15 +53,19 @@ export function screenScene(root, { frameUrl = null } = {}) {
   }
 
   function kindOf(e) {
-    const known = { slide: "слайд", app: "окно программы", browser: "браузер",
-                    terminal: "терминал", people: "люди в кадре", other: "экран" };
     // ⚠️ `sec` — секунда кадра В ЗАПИСИ; `at` у события занято временем прогона (см. `emit`).
     const at = Number.isFinite(e.sec) ? `${clock(e.sec)} · ` : "";
-    return at + (known[e.kind] || (e.error ? "ошибка" : "экран"));
+    return at + (KIND[e.kind] || (e.error ? "ошибка" : "экран"));
   }
 
   return {
     apply(e) {
+      if (e.t === "draft.window" || e.t === "chunk.done") {
+        texted = true;
+        root.setAttribute("hidden", "");
+        return;
+      }
+      if (texted) return;
       // Экран разобран — сцена уходит и отдаёт место тексту (владелец, 30.09): дальше смотреть
       // в ней нечего, а текст правится ещё долго.
       if (e.t === "client.step" && e.step === "screen" && e.done) {
@@ -72,6 +84,7 @@ export function screenScene(root, { frameUrl = null } = {}) {
     reset() {
       done = total = bad = 0;
       finished = false;
+      texted = false;
       head.textContent = "";
       shot.replaceChildren();
       side.replaceChildren();

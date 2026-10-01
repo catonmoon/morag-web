@@ -149,6 +149,29 @@ def remap_speakers(text: str, mapping: dict[str, str], default: str = "") -> str
     return SPEAKER_RE.sub(lambda m: mapping.get(m.group(0)) or default or m.group(0), text)
 
 
+def to_text_labels(mapping: dict[str, str], artifact_text: str, air) -> dict[str, str]:
+    """Карта узнавания — к меткам ТЕКСТА записи.
+
+    ⚠️⚠️ Отпечатки бывают ключованы метками ДИАРИЗАТОРА (`SPEAKER_00`), а текст несёт номера
+    конвейера (`Speaker_0`): так присылало окно до 01.10. Без перевода ни одна метка текста в карте
+    не находилась, и все голоса уходили самому длинному — доклад с ведущим приехал одним
+    человеком. Переводим через `speaker_map` артефакта (кластер → номер). Два кластера на одном
+    номере (склеила машина коллеги) — номер берёт голос с большим эфиром.
+    """
+    if any(SPEAKER_RE.fullmatch(k) for k in mapping):
+        return mapping
+    try:
+        x = json.loads(artifact_text).get("x_enriched") or {}
+    except (ValueError, AttributeError):
+        return mapping
+    out: dict[str, str] = {}
+    best: dict[str, float] = {}
+    for cluster, label in (x.get("speaker_map") or {}).items():
+        if cluster in mapping and air(cluster) >= best.get(label, -1.0):
+            out[label], best[label] = mapping[cluster], air(cluster)
+    return out or mapping
+
+
 def shift_speakers(text: str, base: int) -> str:
     """`Speaker_N` → `Speaker_{base+N}` во всём тексте (артефакт и сайдкары — JSON-строки).
     Регэксп по тексту, а не обход структуры: метка живёт в markdown, `speaker_map`, `turns`,
@@ -362,6 +385,8 @@ async def accept(staging: Staging, rid: str, *, family: Path, cfg, root: Path,
             mapping, report = _voice_ids(staging, d, rid, voices)
             art = d / "artifact.json"
             if mapping:
+                mapping = to_text_labels(mapping, art.read_text(encoding="utf-8"),
+                                         lambda k: _air_of(d, k))
                 default = mapping.get(max(mapping, key=lambda k: _air_of(d, k)), "")
                 art.write_text(remap_speakers(art.read_text(encoding="utf-8"), mapping, default),
                                encoding="utf-8")

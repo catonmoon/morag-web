@@ -19,6 +19,11 @@
 //      сцены-списка больше нет (владелец, 30.09: «можно ли показать на общем тексте?»).
 //   4) редактор: правки те же, что у финал-раунда, плюс свидетель; в шапке — какую страницу он
 //      читает и какое окно переслушивает.
+//   5) «экран» (владелец, 01.10): кадр, разобранный в эту секунду записи, встаёт в текст той же
+//      секунды значком; над ним — слой с картинкой, родом экрана, заголовком и началом описания.
+//      Свежий кадр раскрыт сам пару секунд, дальше — по наведению, как правки. Кадр, пришедший
+//      раньше своего текста (экран разбирается с первой минуты, текст — после диаризации и
+//      пасса-1), ждёт и встаёт, когда текст его секунды появится; такие встают молча.
 //
 // ⚠️ Подсветка ОДНА на всю сцену. Разные анимации на разные случаи читаются как рябь: глаз ищет
 // правило и не находит. Правило здесь простое — жёлтым отмечено то, над чем работают ПРЯМО СЕЙЧАС.
@@ -28,6 +33,7 @@
 // показ, зависящий от неё, просто стоял бы на месте.
 
 import { clock, el, reduced } from "./dom.js";
+import { KIND } from "./screen.js";
 import { colour } from "./voices.js";
 
 const TYPE_MS = 900;       // за столько печатается кусок, если не торопимся
@@ -78,7 +84,7 @@ export function wordRe(word) {
   return new RegExp(`(?<![\\w])${String(word).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w])`);
 }
 
-export function textScene(root) {
+export function textScene(root, { frameUrl = null } = {}) {
   const head = el("p", { class: "tx-head" });
   const body = el("div", { class: "tx-body" });
   const count = el("p", { class: "fx-count" });
@@ -100,6 +106,9 @@ export function textScene(root) {
   let taken = 0, kept = 0;   // решения арбитража: взято / оставлено
   let heard = 0, back = 0;   // переслушано мест / из них вернулась речь
   let edPage = "";           // шапка редактора: какая страница читается
+  let shots = [];            // кадры экрана, ждущие текста своей секунды
+  let shown = 0, shotBad = 0; // кадров экрана встало в текст / не разобралось
+  let lastShot = null;       // свежий (раскрытый) кадр — следующий его гасит
   const jobs = [];
   let busy = 0;
   let landing = 0;           // кусков, которые ещё встают на место черновика (отложено таймером)
@@ -225,6 +234,7 @@ export function textScene(root) {
       piece.till = to || sec;
       body.append(piece);
       anchors.push([sec, piece]);
+      if (shots.length) placeShots();
       return piece;
     }
     // ⚠️ Прежний кусок дописываем ЦЕЛИКОМ, а не по напечатанному: иначе при быстром потоке
@@ -242,6 +252,7 @@ export function textScene(root) {
     typed = 0;
     toEnd();          // кусок уже в разметке — показываем конец сразу, а не со следующего кадра
     pump();
+    if (shots.length) placeShots();
     return piece;
   }
 
@@ -267,12 +278,77 @@ export function textScene(root) {
     mark.spk = spk;
     badges.push(mark);
     if (into) into.append(mark);
-    else if (before && before.parentElement) before.parentElement.insertBefore(mark, before);
+    else if (before && before.parentElement) before.parentElement.insertBefore(mark, headOf(before));
     else body.append(mark);
     return mark;
   }
 
   // --- текст правится --------------------------------------------------------------------
+
+  /** Первый из значков экрана, стоящих ВПЛОТНУЮ перед узлом (или сам узел).
+   *
+   * ⚠️ Метка говорящего блочная и встаёт перед куском; значок экрана той же секунды должен быть
+   * ПОСЛЕ неё, иначе он висит в конце строки предыдущего говорящего и читается как его.
+   */
+  function headOf(node) {
+    const kids = node.parentElement ? node.parentElement.children : [];
+    let i = kids.indexOf ? kids.indexOf(node) : [...kids].indexOf(node);
+    while (i > 0 && kids[i - 1].classList.contains("shot")) i -= 1;
+    return i >= 0 ? kids[i] : node;
+  }
+
+  // --- экран ----------------------------------------------------------------------------
+
+  /** Кусок текста, у которого встанет кадр этой секунды.
+   *
+   * Накрывающий кусок — у него; секунда пришлась на паузу между кусками — у следующего за ней
+   * (кадр показывали, пока молчали, — значит к той речи, что началась после). Текста дальше этой
+   * секунды ещё нет — ждём (`null`).
+   */
+  function hostAt(sec) {
+    let later = null;
+    for (const node of body.children) {
+      if (!node.classList.contains("tx-piece") || node.at == null) continue;
+      if (sec + 0.5 >= node.at && sec - 0.5 <= (node.till ?? node.at)) return node;
+      if (node.at > sec && !later) later = node;
+    }
+    return later;
+  }
+
+  function shotMark(e) {
+    const text = String(e.text || "").trim();
+    const layer = el("span", { class: "ed-old ed-shot" },
+      frameUrl && e.path ? el("img", { src: frameUrl(e.path), alt: "" }) : null,
+      el("span", { class: "ed-shot-kind", text: `${clock(e.sec)} · ${KIND[e.kind] || "экран"}` }),
+      e.title ? el("b", { class: "ed-shot-title", text: e.title }) : null,
+      text ? el("span", { class: "ed-shot-text", text: text.length > 220 ? `${text.slice(0, 218)}…` : text }) : null);
+    const mark = el("span", { class: "ed shot" }, el("span", { class: "tx-shot", text: "▣" }), layer);
+    mark.addEventListener("mouseenter", () => fit(layer));
+    mark.layer = layer;
+    return mark;
+  }
+
+  /** Поставить ждущие кадры, чей текст уже есть. `live` — кадр пришёл только что: раскрыть. */
+  function placeShots(live = null) {
+    const before = shots.length;
+    const wait = [];
+    for (const e of shots) {
+      const host = hostAt(e.sec);
+      if (!host) { wait.push(e); continue; }
+      const mark = shotMark(e);
+      host.parentElement.insertBefore(mark, host);
+      shown += 1;
+      if (e === live) {
+        if (lastShot) lastShot.classList.remove("fresh");
+        lastShot = mark;
+        mark.classList.add("fresh");
+        fit(mark.layer);
+        setTimeout(() => mark.classList.remove("fresh"), VARS_MS);
+      }
+    }
+    shots = wait;
+    if (wait.length !== before || live) summary();
+  }
 
   /** Узел, ближе всего стоящий к этой секунде записи: по нему ищем слово и туда листаем. */
   function near(sec) {
@@ -474,6 +550,7 @@ export function textScene(root) {
         else spot.append(document.createTextNode(text));
       }
       spot.till = job.to || spot.till;
+      if (shots.length) placeShots();
     };
     if (reduced()) land(); else setTimeout(land, hold);
   }
@@ -552,6 +629,10 @@ export function textScene(root) {
     if (taken || kept) parts.push(`второе ухо: взято ${taken} · оставлено ${kept}`);
     if (applied || dropped) parts.push(`правки: принято ${applied} · отброшено ${dropped}`);
     if (turns) parts.push(`реплик ${turns}`);
+    if (shown || shotBad || shots.length) {
+      parts.push(`экран: в тексте ${shown}${shots.length ? ` · ждут текста ${shots.length}` : ""}`
+                 + `${shotBad ? ` · не далось ${shotBad}` : ""}`);
+    }
     count.textContent = parts.join(" · ");
   }
 
@@ -561,6 +642,15 @@ export function textScene(root) {
       // сверху вниз, и человек должен видеть его начало, а не конец черновика.
       if (toTop && e.t !== "draft.window") { body.scrollTop = 0; toTop = false; }
       if (e.t === "diar.spans") { speakers = e.speakers || []; return; }
+      if (e.t === "screen.frame") {
+        // ⚠️ Упавший кадр не молчит — считается в строке под текстом (`describe_slides` отвечает
+        // успехом, если описан хоть один). Люди в кадре в текст не встают: кадр удалён с диска.
+        if (e.error) { shotBad += 1; summary(); return; }
+        if (!Number.isFinite(e.sec) || e.kind === "people") return;
+        shots.push(e);
+        placeShots(e);
+        return;
+      }
       // ⚠️ Черновик приходит ПАЧКОЙ в конце пасса-1 (whisper слушает файл одним вызовом),
       // и это не недоработка показа, а устройство модели. Зато уже к третьей минуте в окне лежит
       // весь текст записи, и дальше он на глазах уточняется.
@@ -663,6 +753,7 @@ export function textScene(root) {
       applied = dropped = turns = current = 0;
       taken = kept = 0; edPage = ""; heard = back = 0;
       marks = []; anchors = [];
+      shots = []; shown = shotBad = 0; lastShot = null;
       head.textContent = ""; body.replaceChildren(); count.textContent = "";
       root.setAttribute("hidden", "");
     },
@@ -678,6 +769,6 @@ export function textScene(root) {
     },
     state: () => ({ mode, applied, dropped, turns, taken, kept, heard, back, following, head: head.textContent,
                     text: body.textContent, speakers: badges.length,
-                    edits: marks.length, queued: jobs.length }),
+                    edits: marks.length, queued: jobs.length, shots: shown, waiting: shots.length }),
   };
 }

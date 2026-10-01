@@ -368,13 +368,25 @@ async function tick() {
       + `Пакет лежит в ${s.home}/${job.id}.`;
     id("send-now").hidden = Boolean(cardReady);   // кнопка живёт в карточке, если карточка есть
     id("open-record").hidden = true;
+    id("copy-record").hidden = true;
+    id("ready-url").textContent = "";
   } else if (job.stage === "done") {
     id("send-now").hidden = true;
     id("open-record").hidden = false;
     id("ready-msg").textContent = "Расшифровка, слайды и поля уже на сайте — запись читается и играет. "
       + (job.search === "later" ? "В поиске она появится после ближайшей плановой индексации. " : "")
       + "Голоса подписываются там же, в режиме правки.";
-    id("open-record").onclick = () => { if (job.url) window.open(job.url, "_blank"); };
+    // ⚠️ Адрес виден текстом и копируется кнопкой: его отправляют в мессенджер (владелец, 01.10).
+    // Открывает и копирует сервер окна — `window.open` в окне приложения не делает ничего.
+    id("copy-record").hidden = !job.url;
+    id("ready-url").textContent = job.url || "";
+    id("open-record").onclick = () => api("/api/open", {}).catch((e) => { id("ready-msg").textContent = e.message; });
+    id("copy-record").onclick = async () => {
+      const btn = id("copy-record");
+      try { await api("/api/copy", {}); btn.textContent = "Скопировано"; }
+      catch (e) { btn.textContent = "Не скопировалось"; id("ready-msg").textContent = e.message; }
+      setTimeout(() => { btn.textContent = "Скопировать адрес"; }, 1800);
+    };
   }
 
   renderParts(s);

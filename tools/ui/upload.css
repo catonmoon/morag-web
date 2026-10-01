@@ -263,3 +263,19 @@ input.path{max-width:460px;margin:12px auto 0;text-align:center;
             font-size:13px;color:var(--ink)}
 .line-check input{display:inline-block;width:auto;flex:none;margin:0;padding:0;
                   border:0;background:none;accent-color:var(--accent-fill)}
+
+/* Экран над текстом своей секунды (владелец, 01.10): значок в тексте, над ним — кадр, род экрана,
+   заголовок и начало описания. Свежий раскрыт сам, дальше — по наведению, как правки.
+   ⚠️ Картинке место отведено заранее (`aspect-ratio`): иначе слой меряется до загрузки кадра,
+   и «влезает ли он над словом» (`fit`) решается по пустому прямоугольнику. */
+.tx-shot{display:inline-block;margin:0 4px 0 0;padding:0 4px;border-radius:4px;cursor:default;
+         font:11px/1.45 var(--mono);color:var(--sonar);background:var(--accent-wash)}
+.ed-old.ed-shot{width:300px;white-space:normal;padding:6px;display:grid;gap:3px;
+                font:11px/1.4 var(--sans)}
+.ed-shot img{display:block;width:100%;aspect-ratio:16/9;object-fit:contain;border-radius:4px;
+             background:var(--surface-2)}
+.ed-shot-kind{font:10px/1.4 var(--mono);color:var(--ink-faint);letter-spacing:.04em}
+.ed-shot-title{font:600 12px/1.35 var(--sans);color:var(--ink)}
+.ed-shot-text{color:var(--ink-dim);max-height:4.2em;overflow:hidden}
+/* Адрес записи по завершении — текстом, его выделяют и отправляют в мессенджер. */
+.ready-url{font:12px/1.5 var(--mono);user-select:text;-webkit-user-select:text;overflow-wrap:anywhere}

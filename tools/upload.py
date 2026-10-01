@@ -221,6 +221,9 @@ TRANSPORT: httpx.BaseTransport | None = None   # тесты подменяют �
 # Когда принятая запись попадёт в поиск — «now» или «later» (плановая индексация). Сервер
 # говорит это в статусе; окно показывает в карточке «готово», чтобы не обещать лишнего.
 LAST_SEARCH = ""
+# Адрес принятой записи на сайте — его отдаёт сервер (`/<пространство>/rec/<id>`), сами не собираем:
+# пространство и id решает он. Окно показывает его кнопками «Открыть» и «Скопировать адрес».
+LAST_URL = ""
 
 
 def client(site: str, cookies: dict[str, str], timeout=60.0) -> httpx.Client:
@@ -456,6 +459,21 @@ def ensure_gateway() -> bool:
     return True     # файл стека переписан — поднятый стек опущен use_site_llm, поднять заново
 
 
+def prints_match(prints: Path, artifact: Path) -> bool:
+    """Ключи отпечатков — те же метки, что в тексте записи? Иначе сервер их не сопоставит.
+
+    ⚠️ Каталог прогона живёт между запусками: `voices.json`, записанный прежней версией
+    (с метками диаризатора), иначе пережил бы и починку — «уже есть — пропускаю».
+    """
+    try:
+        keys = set(json.loads(prints.read_text(encoding="utf-8")))
+        x = json.loads(artifact.read_text(encoding="utf-8")).get("x_enriched") or {}
+    except (OSError, ValueError, AttributeError):
+        return False
+    labels = {str(t.get("speaker_id") or t.get("speaker") or "") for t in x.get("turns") or []}
+    return bool(keys) and keys <= labels
+
+
 def voiceprint(work: Path, artifact: Path) -> Path | None:
     """Отпечатки голосов записи — чтобы сервер узнал, КТО говорит, а не выдавал незнакомцев.
 
@@ -465,7 +483,7 @@ def voiceprint(work: Path, artifact: Path) -> Path | None:
     неузнанных голосов было бы куда хуже.
     """
     out = work / "voices.json"
-    if out.is_file() and out.stat().st_size:
+    if out.is_file() and out.stat().st_size and prints_match(out, artifact):
         say("отпечатки голосов уже есть — пропускаю")
         return out
     audio = work / "audio.mp3"
@@ -857,6 +875,7 @@ def upload(work: Path, site: str, cookies: dict[str, str], manifest: dict, files
             if seen == "done":
                 say(f"готово: {site}{s.get('url') or ''}")
                 globals()["LAST_SEARCH"] = s.get("search") or ""
+                globals()["LAST_URL"] = f"{site}{s.get('url')}" if s.get("url") else ""
                 if s.get("search") == "later":
                     say("  (в поиске запись появится после ближайшей плановой индексации — обычно ночью)")
                 emit("upload.state", state="done", search=s.get("search") or "")
@@ -1017,6 +1036,9 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
 SPEAKER_SHARE = 0.2
 
 
+EARLY_PRINTS = "voices.early.json"   # отпечатки по диаризации — для показа, на сайт не едут
+
+
 def early_voices(work: Path, spans_event: dict, site: str, cookies: dict, episode: str,
                  done: dict) -> None:
     """Отпечатки и узнавание СРАЗУ ПОСЛЕ ДИАРИЗАЦИИ, фоном.
@@ -1055,11 +1077,17 @@ def early_voices(work: Path, spans_event: dict, site: str, cookies: dict, episod
         return
     if not prints:
         return
-    (work / "voices.json").write_text(json.dumps(prints, ensure_ascii=False), encoding="utf-8")
-    done.update(identify_voices(work, site, cookies, episode))
+    # ⚠️⚠️ В СВОЙ файл, не в `voices.json`. Ранние отпечатки ключуются метками ДИАРИЗАТОРА
+    # (`SPEAKER_00`), а текст записи — номерами конвейера (`Speaker_0`); после `resplit` и раскладка
+    # голосов другая. Лёжа в `voices.json`, они отменяли финальный подсчёт («уже есть — пропускаю»),
+    # и сервер не находил в карте ни одной метки текста: все голоса отдавались самому длинному —
+    # доклад с ведущим приехал одним человеком (владелец, 01.10). Ранние — только для показа имён.
+    (work / EARLY_PRINTS).write_text(json.dumps(prints, ensure_ascii=False), encoding="utf-8")
+    done.update(identify_voices(work, site, cookies, episode, name=EARLY_PRINTS))
 
 
-def identify_voices(work: Path, site: str, cookies: dict, episode: str = "") -> dict:
+def identify_voices(work: Path, site: str, cookies: dict, episode: str = "",
+                    name: str = "voices.json") -> dict:
     """Кто говорит — СПРАШИВАЕМ У САЙТА, не дожидаясь приёма записи.
 
     ⚠️ Номера голосов на этой машине НИЧЕГО НЕ ЗНАЧАТ: реестр корпуса живёт на сервере, и
@@ -1070,7 +1098,7 @@ def identify_voices(work: Path, site: str, cookies: dict, episode: str = "") -> 
     ⚠️ Имена берём ОТДЕЛЬНЫМ запросом: узнавание отвечает номерами, а имена живут в словаре
     (`names.json`), который реестр не читает вовсе.
     """
-    path = work / "voices.json"
+    path = work / name
     if not path.is_file():
         return {}
     try:

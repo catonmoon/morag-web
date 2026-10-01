@@ -244,6 +244,7 @@ def start(fields: dict) -> dict:
         upload.LOG.clear()
 
     def work() -> None:
+        upload.LAST_URL = ""
         try:
             upload.pipeline(
                 video,
@@ -259,7 +260,9 @@ def start(fields: dict) -> dict:
             sent = bool(STATE.get("send", True))
             STATE.update({"stage": "done", "finished": time.time(), "search": upload.LAST_SEARCH,
                           "sent": sent,
-                          "url": f"{site}/{fields.get('slug', '')}".rstrip("/") if sent else ""})
+                          # ⚠️ Адрес — ОТ СЕРВЕРА (`upload.LAST_URL`): прежде он собирался из поля
+                          # `slug`, которого в форме нет, и «Открыть запись» вела на корень сайта.
+                          "url": (upload.LAST_URL or site) if sent else ""})
         except upload.Step as error:
             STATE.update({"stage": "error", "error": str(error), "finished": time.time()})
             upload.say(f"⚠️ {error}")
@@ -449,6 +452,23 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if url.path == "/api/llm":
                 self._json(upload.use_site_llm())
+                return
+            if url.path in ("/api/open", "/api/copy"):
+                # ⚠️ Открывает и копирует СЕРВЕР окна, а не страница: окно — `WKWebView`, и
+                # `window.open` там молча ничего не делает (без делегата новых окон), а буфер из
+                # страницы зависит от версии WebKit. Действуем только над адресом ПРИНЯТОЙ записи
+                # из своего состояния — произвольный адрес от страницы не берём.
+                link = str(STATE.get("url") or "")
+                if not link.startswith(("https://", "http://")):
+                    self._json({"error": "адреса записи нет — она не отправлена на сайт"}, 400)
+                    return
+                if url.path == "/api/copy":
+                    subprocess.run(["pbcopy"], input=link.encode("utf-8"), check=True, timeout=5)
+                elif sys.platform == "darwin":
+                    subprocess.run(["open", link], check=True, timeout=10)
+                else:
+                    webbrowser.open(link)
+                self._json({"ok": True, "url": link})
                 return
             if url.path == "/api/reset":
                 if STATE["stage"] == "running":

@@ -716,4 +716,51 @@ const { sendScene, size } = await import(join(repo, "tools/ui/send.js"));
   assert.equal(scene.state().following, true, "вернулись к фронту — снова следим");
 }
 
+{
+  // Экран слоем над текстом своей секунды (владелец, 01.10): кадр раньше текста ждёт его,
+  // встаёт перед куском этой секунды и ПОСЛЕ метки говорящего; блок с кадром уходит с текстом.
+  const sroot = new El("div");
+  const screen = screenScene(sroot, { frameUrl: (x) => x });
+  screen.apply({ t: "client.step", step: "screen", lane: "side", say: "разбираю" });
+  screen.apply({ t: "screen.frame", path: "/w/s001.jpg", sec: 40, kind: "slide", title: "Очереди", n: 3, done: 1 });
+  assert.equal(sroot.attrs.hidden, undefined, "текста нет — кадр в блоке");
+
+  const root = new El("div");
+  const scene = textScene(root, { frameUrl: (x) => `/f?${x}` });
+  const body = root.children.find((n) => n.classList.contains("tx-body"));
+  scene.apply({ t: "screen.frame", path: "/w/s001.jpg", sec: 40, kind: "slide", title: "Очереди", text: "Схема", n: 3, done: 1 });
+  scene.apply({ t: "screen.frame", path: "", error: "ConnectError", n: 3, done: 2 });
+  scene.apply({ t: "screen.frame", path: "/w/p.jpg", sec: 50, kind: "people", n: 3, done: 3 });
+  assert.equal(scene.state().waiting, 1, "текста нет — кадр ждёт");
+  assert.equal(scene.state().shots, 0);
+
+  scene.apply({ t: "stage.start", stage: "pass1" });
+  for (let i = 0; i < 3; i++) scene.apply({ t: "draft.window", from: i * 30, to: i * 30 + 30, text: `кусок ${i}` });
+  screen.apply({ t: "draft.window", from: 0, to: 30, text: "кусок 0" });
+  assert.equal(sroot.attrs.hidden, "", "пошёл текст — блок кадра ушёл");
+  screen.apply({ t: "screen.frame", path: "/w/s002.jpg", sec: 70, kind: "slide", n: 4, done: 4 });
+  assert.equal(sroot.attrs.hidden, "", "и поздний кадр его не возвращает");
+
+  assert.equal(scene.state().shots, 1, "кадр встал, когда появился текст его секунды");
+  const kids = body.children;
+  const mark = kids.find((n) => n.classList.contains("shot"));
+  assert.equal(kids[kids.indexOf(mark) + 1].textContent.trim(), "кусок 1", "перед куском 0:30–1:00");
+  assert.match(mark.textContent, /0:40 · слайд/);
+  assert.match(mark.textContent, /Очереди/);
+  assert.match(root.textContent, /не далось 1/, "упавший кадр сказан вслух");
+
+  // живой кадр после текста — раскрыт сам
+  scene.apply({ t: "screen.frame", path: "/w/s003.jpg", sec: 75, kind: "slide", n: 5, done: 5 });
+  assert.equal(scene.state().shots, 2);
+
+  // метка говорящего встаёт ПЕРЕД значком экрана, а не между значком и текстом
+  scene.apply({ t: "stage.start", stage: "pass2" });
+  scene.apply({ t: "chunk.start", i: 2, n: 3, from: 30, to: 58, spk: "S1" });
+  scene.apply({ t: "chunk.done", i: 2, raw: "чистовик" });
+  flush(20);
+  const who = body.children.findIndex((n) => n.classList.contains("tx-who"));
+  const at = body.children.findIndex((n) => n.classList.contains("shot"));
+  assert.ok(who >= 0 && who < at, "метка, потом значок, потом текст");
+}
+
 console.log("ok upload-scenes");

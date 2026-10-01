@@ -269,6 +269,22 @@ def test_a_voice_without_a_fingerprint_goes_to_the_loudest(live, tmp_path):
     assert "Speaker_9" not in out
 
 
+def test_prints_keyed_by_diarizer_labels_still_split_the_voices():
+    # ⚠️⚠️ Окно до 01.10 присылало отпечатки с метками ДИАРИЗАТОРА, а текст нёс номера конвейера:
+    # ни одна метка текста не находилась в карте, и ведущий с докладчиком стали одним человеком.
+    import json
+    from app.content.upload import remap_speakers, to_text_labels
+    art = json.dumps({"x_enriched": {"speaker_map": {"SPEAKER_01": "Speaker_0", "SPEAKER_00": "Speaker_1"},
+                                     "markdown": "[Speaker_1] привет [Speaker_0] доклад"}}, ensure_ascii=False)
+    air = {"SPEAKER_00": 20.6, "SPEAKER_01": 1112.9}.get
+    mapping = to_text_labels({"SPEAKER_00": "Speaker_176", "SPEAKER_01": "Speaker_12"}, art, air)
+    assert mapping == {"Speaker_1": "Speaker_176", "Speaker_0": "Speaker_12"}
+    out = remap_speakers(art, mapping, default="Speaker_12")
+    assert "[Speaker_176] привет [Speaker_12] доклад" in out
+    # карта уже в метках текста — не трогаем
+    assert to_text_labels({"Speaker_0": "Speaker_5"}, art, air) == {"Speaker_0": "Speaker_5"}
+
+
 def test_repeat_accept_does_not_renumber(live, tmp_path):
     c, demo, archive, marker = live
     with_registry(c, tmp_path, **{"19": (7, "Мария Кузнецова")})
