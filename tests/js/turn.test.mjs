@@ -22,7 +22,8 @@ class El {
       add: (...c) => c.forEach((x) => set.add(x)),
       remove: (...c) => c.forEach((x) => set.delete(x)),
       contains: (c) => set.has(c),
-      toggle: (c, on) => (on ? set.add(c) : set.delete(c)),
+      // Без второго аргумента — ПЕРЕКЛЮЧЕНИЕ, как в браузере (раньше всегда удаляло).
+      toggle: (c, on = !set.has(c)) => (on ? set.add(c) : set.delete(c)),
     };
   }
   set className(v) {
@@ -252,6 +253,25 @@ check("восстановленный ход рисуется без ленты 
   assert.equal(old.node.findAll("trace").length, 0, "у восстановленного хода лента не нужна");
   assert.ok(old.node.find("answer").textContent.includes("Текст ответа"));
   assert.equal(old.node.findAll("moment").length, 1);
+});
+
+check("лента «как искал»: раскрыта, пока ищет; первый текст ответа сворачивает её", () => {
+  // владелец, 01.10: пока ответа нет, смотреть больше не на что; когда пишется — читают его
+  const t = createTurn("Вопрос", {});
+  const trace = t.node.find("trace");
+  assert.ok(trace.classList.contains("open"), "новый ход — лента раскрыта");
+  t.addStatus("🔍 [ключ] по всей базе");
+  t.addToken("  ");
+  assert.ok(trace.classList.contains("open"), "пробел — ещё не ответ");
+  t.addToken("Ответ");
+  assert.ok(!trace.classList.contains("open"), "пошёл текст — свернулась до полоски");
+
+  const mine = createTurn("Вопрос", {});
+  const tr = mine.node.find("trace");
+  tr._on.click({});                       // человек свернул сам…
+  tr._on.click({});                       // …и раскрыл обратно
+  mine.addToken("Ответ");
+  assert.ok(tr.classList.contains("open"), "щёлкнул сам — автоматика не трогает");
 });
 
 console.log("\nврезка с цитатой прямо в тексте:");

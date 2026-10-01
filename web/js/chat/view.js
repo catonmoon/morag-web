@@ -44,11 +44,14 @@ export function createTurn(question, { context = null, onOpenRecord, onShareMome
 
   // Лента «как искал»: свёрнутая показывает ПОСЛЕДНИЙ шаг, раскрытая — все.
   // Отдельной итоговой строки нет: свежий статус и есть итог на данный момент.
+  // Пока ищет — РАСКРЫТА, пошёл ответ — сворачивается до полоски (владелец, 01.10): пока
+  // ответа нет, смотреть больше не на что, а когда он пишется, читают уже его. Щёлкнул сам —
+  // автоматика больше не трогает: человек решил, что ему нужно.
   const sumMeta = el("span", { class: "sum-meta" });
   const chevron = el("span", { class: "chev", html: CHEV });
   const steps = el("div", { class: "steps" });
   const trace = el("div", {
-    class: "trace live",
+    class: "trace live open",
     role: "button",
     tabindex: "0",
     "aria-label": "Показать, как искал",
@@ -56,7 +59,8 @@ export function createTurn(question, { context = null, onOpenRecord, onShareMome
   trace.append(steps);
   addStep("🧭", "Думаю…").dataset.seed = "1"; // временная строка до первого статуса движка
 
-  const toggle = () => trace.classList.toggle("open");
+  let touched = false;
+  const toggle = () => { touched = true; trace.classList.toggle("open"); };
   trace.addEventListener("click", toggle);
   trace.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -148,6 +152,7 @@ export function createTurn(question, { context = null, onOpenRecord, onShareMome
       addStep(icon || "·", rest || text);
     },
     addToken(text) {
+      if (!touched && /\S/.test(text) && !rawParts.some((t) => /\S/.test(t))) trace.classList.remove("open");
       rawParts.push(text);
       scheduleRender(); // разметку пересобираем по ходу печати, а не только в конце
     },
