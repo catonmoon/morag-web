@@ -232,12 +232,21 @@ fi
 
 # --- 6. команда и приложение -------------------------------------------------------------
 step 6 "приложение"
+# Имя приложения — настройка корпуса (`app.env` с зеркала, `APP_TITLE=…`); у платформы своё,
+# нейтральное. Прежнее приложение под другим именем убираем: два значка одного и того же
+# в «Программах» путают, а запускают они одно и то же.
+APP_TITLE="Загрузить запись"
+[ -f "$ROOT/app.env" ] && . "$ROOT/app.env"
+OLD_APP="$APP"
+APP="$APPS/$APP_TITLE.app"
+[ "$OLD_APP" != "$APP" ] && [ -d "$OLD_APP" ] && rm -rf "$OLD_APP"
 cat > "$ROOT/bin/morag-upload" <<EOF
 #!/bin/sh
 # То же самое из терминала: morag-upload ui | app | run видео.mp4 …
 export ASR_STACK_ENV="$ENV_FILE" MORAG_REPO="$ROOT/morag" ASR_STACK_HOME="$STACK" MORAG_SITE="$SITE"
 export SSL_CERT_FILE="$CA" REQUESTS_CA_BUNDLE="$CA"
 export PATH="$ROOT/bin:\$PATH"
+export MORAG_UPLOAD_TITLE="$APP_TITLE"
 exec "$VIDEO/bin/python" "$ROOT/web/tools/upload.py" "\$@"
 EOF
 chmod 755 "$ROOT/bin/morag-upload"
@@ -254,8 +263,8 @@ EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleName</key><string>Загрузить запись</string>
-  <key>CFBundleDisplayName</key><string>Загрузить запись</string>
+  <key>CFBundleName</key><string>$APP_TITLE</string>
+  <key>CFBundleDisplayName</key><string>$APP_TITLE</string>
   <key>CFBundleIdentifier</key><string>org.morag.upload</string>
   <key>CFBundleExecutable</key><string>launcher</string>
   <key>CFBundlePackageType</key><string>APPL</string>
@@ -265,16 +274,22 @@ EOF
   <key>LSMinimumSystemVersion</key><string>13.0</string>
 </dict></plist>
 EOF
-  # Значок — по желанию: картинка корпуса с зеркала. Нет её или нет системных `sips`/`iconutil` —
-  # приложение просто с обычным значком, на работу это не влияет.
-  if [ -f "$ROOT/icon.png" ] && command -v sips >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
+  # Значок — котик в луне из консоли morag (`tools/ui/app-icon.png`, рисует `make_app_icon.py`);
+  # у корпуса может быть свой — `app-icon.png` с зеркала. ⚠️ Не `icon.png`: под этим именем
+  # зеркала раньше возили значок корпуса, и он остался в установках — подхватился бы снова.
+  # Нет системных `sips`/`iconutil` — приложение с обычным значком, на работу это не влияет.
+  ICON="$ROOT/web/tools/ui/app-icon.png"
+  [ -f "$ROOT/app-icon.png" ] && ICON="$ROOT/app-icon.png"
+  if [ -f "$ICON" ] && command -v sips >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
     ICONSET="$ROOT/dist/app.iconset"; rm -rf "$ICONSET"; mkdir -p "$ICONSET"
     for s in 16 32 64 128 256 512; do
-      sips -z $s $s "$ROOT/icon.png" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null 2>&1 || true
-      sips -z $((s*2)) $((s*2)) "$ROOT/icon.png" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null 2>&1 || true
+      sips -z $s $s "$ICON" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null 2>&1 || true
+      sips -z $((s*2)) $((s*2)) "$ICON" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null 2>&1 || true
     done
     iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/app.icns" >/dev/null 2>&1 || true
     rm -rf "$ICONSET"
+    # Finder держит значок приложения в кэше: без «касания» новый появится только после выхода.
+    touch "$APP"
   fi
   # Ad-hoc-подпись: без неё macOS считает приложение НОВЫМ после каждого обновления и заново
   # спрашивает доступ к «Загрузкам» и «Рабочему столу».
@@ -296,7 +311,7 @@ find "$DIST" -type f ! -name 'manifest.sh' -delete 2>/dev/null || true
 ok "освободил ${FREED:-0} МБ скачанного (при повторной установке скачается снова)"
 cat <<EOF
 
-  Приложение «Загрузить запись» — в папке «Программы» вашей домашней папки
+  Приложение «$APP_TITLE» — в папке «Программы» вашей домашней папки
   (Finder → Переход → Личная папка → Applications; или Spotlight по слову «Загрузить»).
 
   Первый запуск: войдите на сайт своей учётной записью — больше ничего настраивать не надо,

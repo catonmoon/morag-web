@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -30,7 +31,8 @@ sys.path.insert(0, str(HERE))
 
 import upload_ui  # noqa: E402
 
-TITLE = "Загрузить запись"
+# Имя окна — как у приложения: установщик кладёт его в окружение (`app.env` корпуса с зеркала).
+TITLE = os.environ.get("MORAG_UPLOAD_TITLE") or upload_ui.DEFAULT_TITLE
 WIDTH, HEIGHT = 980, 720
 
 

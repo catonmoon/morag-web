@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import secrets
@@ -37,6 +38,7 @@ SITE_LLM_PATH = upload.SITE_LLM_PATH
 
 HERE = Path(__file__).resolve().parent
 PAGE = HERE / "upload-ui.html"
+DEFAULT_TITLE = "Загрузить запись"   # имя у платформы; у корпуса своё — `MORAG_UPLOAD_TITLE`
 UI = HERE / "ui"                       # стили, шрифты и сцены страницы
 TYPES = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8",
          ".woff2": "font/woff2", ".png": "image/png", ".svg": "image/svg+xml",
@@ -326,7 +328,11 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         query = parse_qs(url.query)
         if url.path == "/":
-            self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+            # Заголовок страницы — тем же именем, что у приложения (вкладка, если окно открыто в
+            # браузере, и шапка формы).
+            title = os.environ.get("MORAG_UPLOAD_TITLE") or DEFAULT_TITLE
+            page = PAGE.read_text(encoding="utf-8").replace(f">{DEFAULT_TITLE}<", f">{html.escape(title)}<")
+            self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
             return
         if url.path.startswith("/ui/"):
             self._static(url.path[4:])
