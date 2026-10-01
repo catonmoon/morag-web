@@ -238,7 +238,7 @@ step 6 "приложение"
 APP_TITLE="Загрузить запись"
 [ -f "$ROOT/app.env" ] && . "$ROOT/app.env"
 OLD_APP="$APP"
-APP="$APPS/$APP_TITLE.app"
+APP="$APPS/${APP_TITLE}.app"
 [ "$OLD_APP" != "$APP" ] && [ -d "$OLD_APP" ] && rm -rf "$OLD_APP"
 cat > "$ROOT/bin/morag-upload" <<EOF
 #!/bin/sh
@@ -246,7 +246,7 @@ cat > "$ROOT/bin/morag-upload" <<EOF
 export ASR_STACK_ENV="$ENV_FILE" MORAG_REPO="$ROOT/morag" ASR_STACK_HOME="$STACK" MORAG_SITE="$SITE"
 export SSL_CERT_FILE="$CA" REQUESTS_CA_BUNDLE="$CA"
 export PATH="$ROOT/bin:\$PATH"
-export MORAG_UPLOAD_TITLE="$APP_TITLE"
+export MORAG_UPLOAD_TITLE="${APP_TITLE}"
 exec "$VIDEO/bin/python" "$ROOT/web/tools/upload.py" "\$@"
 EOF
 chmod 755 "$ROOT/bin/morag-upload"
@@ -263,8 +263,8 @@ EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleName</key><string>$APP_TITLE</string>
-  <key>CFBundleDisplayName</key><string>$APP_TITLE</string>
+  <key>CFBundleName</key><string>${APP_TITLE}</string>
+  <key>CFBundleDisplayName</key><string>${APP_TITLE}</string>
   <key>CFBundleIdentifier</key><string>org.morag.upload</string>
   <key>CFBundleExecutable</key><string>launcher</string>
   <key>CFBundlePackageType</key><string>APPL</string>
@@ -311,7 +311,7 @@ find "$DIST" -type f ! -name 'manifest.sh' -delete 2>/dev/null || true
 ok "освободил ${FREED:-0} МБ скачанного (при повторной установке скачается снова)"
 cat <<EOF
 
-  Приложение «$APP_TITLE» — в папке «Программы» вашей домашней папки
+  Приложение «${APP_TITLE}» — в папке «Программы» вашей домашней папки
   (Finder → Переход → Личная папка → Applications; или Spotlight по слову «Загрузить»).
 
   Первый запуск: войдите на сайт своей учётной записью — больше ничего настраивать не надо,
