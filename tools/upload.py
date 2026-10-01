@@ -436,7 +436,7 @@ def _session_key_off_site(key: str, base: str) -> bool:
     return key in cookies.values() and not (base or "").startswith(site)
 
 
-def ensure_gateway() -> None:
+def ensure_gateway() -> bool:
     """Перед подъёмом стека убедиться, что стадиям с ИИ есть куда ходить.
 
     ⚠️ Без ключа адаптер не просто теряет LLM-стадии — он НЕ СТАРТУЕТ вовсе (строит клиента на
@@ -446,13 +446,14 @@ def ensure_gateway() -> None:
     """
     key, base = stack_env_value("OR_KEY"), stack_env_value("ASR_LLM_BASE_URL")
     if key and not _session_key_off_site(key, base):
-        return
+        return False
     say("шлюз ещё не настроен — беру доступ у сайта…" if not key
         else "ключ — сессия сайта, а адрес шлюза прямой: настраиваю ход через сайт заново…")
     out = use_site_llm()
     if not out.get("via_site") or not stack_env_value("OR_KEY"):
         raise Step("нечем ходить в LLM-шлюз: войдите на сайт в настройках приложения "
                    "(или впишите свой ключ — «У меня свой ключ»)")
+    return True     # файл стека переписан — поднятый стек опущен use_site_llm, поднять заново
 
 
 def voiceprint(work: Path, artifact: Path) -> Path | None:
@@ -926,10 +927,14 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
     stack_started = False
     known_voices: dict = {}    # метка → {voice, name, air}; наполняется фоном сразу после диаризации
     try:
-        if with_stack and not (work / "artifact.json").is_file() and not stack_health():
-            ensure_gateway()
-            stack("up")
-            stack_started = True
+        # ⚠️ Шлюз проверяем ВСЕГДА, а не только когда стек ещё не поднят: окно поднимает стек
+        # заранее (прогрев), и с прямым адресом шлюза вместо ручки сайта он жил бы всю работу —
+        # 401 на каждой стадии с ИИ (ловилось 01.10 после переустановки). Перенастроили — стек
+        # опущен (адаптер читает файл при старте) и поднимается заново.
+        if with_stack and not (work / "artifact.json").is_file():
+            if ensure_gateway() or not stack_health():
+                stack("up")
+                stack_started = True
         TRACE[:] = [work / "events.jsonl"]   # трасса прогона: по ней настраивается окно (стенд)
         emit("client.step", step="audio", say="звук из видео")
         def spans_ready(fields: dict) -> None:
