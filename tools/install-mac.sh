@@ -174,11 +174,19 @@ grep -q '^OR_KEY=..' "$ENV_FILE" || setenv OR_KEY ""
 # Адрес и модель шлюза приезжают с зеркала (`gateway.env`) — это настройка корпуса, а не секрет;
 # ключ к шлюзу у каждого свой и спрашивается в приложении.
 # ⚠️ `a && b` под `set -e` — выход из скрипта, когда `a` ложно: поэтому только `if`.
-if [ -f "$ROOT/gateway.env" ]; then
-  . "$ROOT/gateway.env"
-  if [ -n "${ASR_LLM_BASE_URL:-}" ]; then setenv ASR_LLM_BASE_URL "$ASR_LLM_BASE_URL"; fi
-  if [ -n "${ASR_LLM_MODEL:-}" ]; then setenv ASR_LLM_MODEL "$ASR_LLM_MODEL"; fi
-fi
+# ⚠️ Но НЕ поверх хода через сайт: если приложение уже прописало ручку сайта (`/api/upload/llm`),
+# переустановка затёрла бы её прямым адресом шлюза при оставшейся строке сессии в OR_KEY — и все
+# стадии с ИИ получали бы 401 (ловилось 01.10 на переустановке поверх вошедшей сессии).
+CUR_LLM="$(grep '^ASR_LLM_BASE_URL=' "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+case "$CUR_LLM" in
+  */api/upload/llm*) ;;
+  *)
+    if [ -f "$ROOT/gateway.env" ]; then
+      . "$ROOT/gateway.env"
+      if [ -n "${ASR_LLM_BASE_URL:-}" ]; then setenv ASR_LLM_BASE_URL "$ASR_LLM_BASE_URL"; fi
+      if [ -n "${ASR_LLM_MODEL:-}" ]; then setenv ASR_LLM_MODEL "$ASR_LLM_MODEL"; fi
+    fi ;;
+esac
 ok "$ENV_FILE"
 
 # --- 5. окружения питона -----------------------------------------------------------------

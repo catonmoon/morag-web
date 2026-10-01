@@ -421,6 +421,21 @@ def stack_trouble() -> str:
     return "; ".join(out)
 
 
+def _session_key_off_site(key: str, base: str) -> bool:
+    """Ключ в файле стека — строка СЕССИИ сайта, а адрес шлюза ведёт не на сайт.
+
+    ⚠️ Так бывает после переустановки поверх вошедшей сессии: установщик кладёт адрес шлюза с
+    зеркала, сессия остаётся — и стадии с ИИ идут прямо в шлюз с чужим для него ключом, 401
+    (ловилось 01.10: разбор экрана сыпал «401 Unauthorized» на каждый кадр). Свой ключ человека
+    сюда не попадает: он не совпадает ни с одной cookie сайта.
+    """
+    try:
+        site, cookies = load_session(None)
+    except Exception:       # noqa: BLE001 — нет сессии: судить не о чем
+        return False
+    return key in cookies.values() and not (base or "").startswith(site)
+
+
 def ensure_gateway() -> None:
     """Перед подъёмом стека убедиться, что стадиям с ИИ есть куда ходить.
 
@@ -429,9 +444,11 @@ def ensure_gateway() -> None:
     Настройка через сайт делается при входе, но вход мог случиться раньше обновления — поэтому
     проверяем здесь, у самой работы, и чиним молча.
     """
-    if stack_env_value("OR_KEY"):
+    key, base = stack_env_value("OR_KEY"), stack_env_value("ASR_LLM_BASE_URL")
+    if key and not _session_key_off_site(key, base):
         return
-    say("шлюз ещё не настроен — беру доступ у сайта…")
+    say("шлюз ещё не настроен — беру доступ у сайта…" if not key
+        else "ключ — сессия сайта, а адрес шлюза прямой: настраиваю ход через сайт заново…")
     out = use_site_llm()
     if not out.get("via_site") or not stack_env_value("OR_KEY"):
         raise Step("нечем ходить в LLM-шлюз: войдите на сайт в настройках приложения "
