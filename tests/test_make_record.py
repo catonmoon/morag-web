@@ -591,11 +591,34 @@ def test_roles_owner_override_wins():
     assert r["participants"] == ["Мария Кузнецова", "Пётр Ковалёв"]
 
 
+def test_roles_do_not_double_a_person_written_surname_first():
+    """Метка поста «Фамилия Имя», голос и рука владельца — «Имя Фамилия»: в шапке ОДИН человек.
+
+    ⚠️⚠️ Было (01.10): «Выступали: Ковалёв Пётр, Пётр Ковалёв» — сверка считала фамилией
+    последнее слово, и метка поста не сходилась ни с голосом, ни с рукой владельца.
+    """
+    meta = {"speakers": [{"name": "Ковалёв Пётр", "from": "tag"}],
+            "roles": {"speakers": ["Пётр Ковалёв"]}}
+    r = make_record.roles_of(ROLE_BODY, ROLE_WORDS, meta, TALK)
+    assert r["speakers"] == ["Пётр Ковалёв"]
+    assert "Пётр Ковалёв" not in r["participants"]
+    # и без руки владельца — имя голоса (форма словаря), а не метки
+    r = make_record.roles_of(ROLE_BODY, ROLE_WORDS, {"speakers": [{"name": "Ковалёв Пётр", "from": "tag"}]}, TALK)
+    assert r["speakers"] == ["Пётр Ковалёв"]
+
+
 def test_same_person_tolerates_spellings():
     assert make_record.same_person("Люба Кузнецова", "Любовь Кузнецова")   # уменьшительное
     assert make_record.same_person("Ковалёв", "Пётр Ковалёв")               # фамилия без имени
     assert make_record.same_person("Лев Семёнов", "Лев Семенов")             # ё/е
     assert not make_record.same_person("Марк Соколов", "Макар Соколов")     # разные имена
+    # ⚠️⚠️ Порядок слов у источников разный: метка поста и каталог пишут фамилию первой — иначе
+    # в «Выступали» один человек стоял дважды (01.10).
+    assert make_record.same_person("Воробьёва Зоя", "Зоя Воробьёва")           # метка поста
+    assert make_record.same_person("Кузнецова Любовь Петровна", "Люба Кузнецова")  # каталог, с отчеством
+    assert make_record.same_person("Кузнецова Люба", "Кузнецова Любовь")
+    assert not make_record.same_person("Кузнецова Мария", "Люба Кузнецова")   # другое имя
+    assert not make_record.same_person("Олег", "Олег Соколов")                # одно слово — не перевёрнутое имя
 
 
 # --- категория, темы, год ------------------------------------------------------------------

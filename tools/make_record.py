@@ -180,9 +180,37 @@ def person_key(name: str) -> tuple[str, str]:
     return (surname, DIMINUTIVE.get(first, first))
 
 
+def surname_first_key(name: str) -> tuple[str, str] | None:
+    """Ключ для порядка «Фамилия Имя [Отчество]» — так пишут метки постов и каталог AD.
+
+    Только для имён из двух слов и больше: у одного слова порядка нет.
+    """
+    parts = name.replace("ё", "е").replace("Ё", "Е").split()
+    if len(parts) < 2:
+        return None
+    first = parts[1].lower()
+    return (parts[0].lower(), DIMINUTIVE.get(first, first))
+
+
 def same_person(a: str, b: str) -> bool:
+    """Один ли это человек, при любом порядке «Имя Фамилия» / «Фамилия Имя».
+
+    ⚠️⚠️ Порядок слов у источников РАЗНЫЙ: словарь имён пишет «Люба Кузнецова», метка поста —
+    «Кузнецова Люба», каталог — «Кузнецова Любовь Петровна». Пока фамилией считалось только
+    последнее слово, метка поста не сходилась с голосом, и в «Выступали» один человек стоял
+    дважды (владелец, 01.10). Перевёрнутый порядок пробуем, только когда в ОБОИХ именах есть
+    имя и фамилия: одиночное слово иначе сошлось бы с любым тёзкой («Олег» и «Олег Соколов»).
+    """
+    def match(ka, kb) -> bool:
+        return bool(ka[0]) and ka[0] == kb[0] and (not ka[1] or not kb[1] or ka[1] == kb[1])
+
     ka, kb = person_key(a), person_key(b)
-    return bool(ka[0]) and ka[0] == kb[0] and (not ka[1] or not kb[1] or ka[1] == kb[1])
+    if match(ka, kb):
+        return True
+    ra, rb = surname_first_key(a), surname_first_key(b)
+    if ra is None or rb is None:
+        return False
+    return match(ra, kb) or match(ka, rb) or match(ra, rb)
 
 
 def airtime_of(words: dict) -> dict[str, float]:
