@@ -447,24 +447,6 @@ check("фокус в поле ввода держит слежение и без
   assert.equal(scrolls.length, 1);
 });
 
-check("курсор в абзаце правки — слежение идёт; набрал текст — стоит", () => {
-  // владелец, 02.10: в режиме правки щелчок ставит курсор в абзац и перематывает звук — это
-  // ещё не правка, и страница обязана вести за словом
-  const t = follower(null, { headroom: 0 });
-  const was = document.activeElement;
-  const attrs = {};
-  document.activeElement = { tagName: "DIV", isContentEditable: true, getAttribute: (k) => attrs[k] };
-  scrolls.length = 0;
-  t.follow(far);
-  assert.equal(scrolls.length, 1, "курсор просто стоит в абзаце, а слежение замерло");
-  attrs["data-dirty"] = "1";              // начал набирать
-  scrolls.length = 0;
-  t.follow(far);
-  assert.equal(scrolls.length, 0, "человек правит абзац, а страница уехала");
-  assert.equal(t.locked, true);
-  document.activeElement = was;
-});
-
 check("высота липкого блока может считаться на лету", () => {
   // headroom функцией: вёрстка меняется на узком экране, число в коде — нет
   let sticky = 100;

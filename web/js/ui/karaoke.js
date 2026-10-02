@@ -202,7 +202,6 @@ export function buildKaraoke(
     // абзацы, и часовой доклад становится одной простынёй с одним тайм-кодом. Неразрывный
     // пробел, который браузер ставит при наборе, `\s` тоже ловит.
     const text = para.body.textContent.replace(/\s+/g, " ").trim();
-    para.body.removeAttribute("data-dirty");
     restore(i);
     // Пустой абзац не применяем: удалить реплику целиком — отдельная задача, а не стёртый текст.
     if (!apply || !text || text === para.text) return;
@@ -214,13 +213,6 @@ export function buildKaraoke(
   function editable(i) {
     const para = paragraphs[i];
     const body = para.body;
-    // ⚠️⚠️ «Правит» — это НАБРАЛ, а не «курсор в абзаце» (владелец, 02.10). Щелчок в абзац
-    // перематывает звук, и фокус остаётся в нём; пока признаком правки был фокус, слежение за
-    // словом замирало на весь режим правки. Метка снимается, когда правка применилась или
-    // откатилась (`settle`).
-    body.addEventListener("input", () => {
-      if (editing) body.setAttribute("data-dirty", "1");
-    });
     body.addEventListener("focus", () => {
       if (!editing) return;
       hideShare(); // плашка «поделиться» висела бы поверх набираемого текста
@@ -566,15 +558,13 @@ export function follower(scroller, { pauseMs = 2500, headroom = 0 } = {}) {
   // слову, и карточка с полем ввода уезжала из-под рук — «править спикера, пока идёт запись,
   // нереально». Пауза записи была бы хуже: правя, хочется ПЕРЕСЛУШАТЬ (правило 08.09).
   // Замок счётный (карточка и поле могут быть открыты разом) и дублируется проверкой фокуса:
-  // поле ввода держит слежение фокусом, а абзац, который правят на месте, — только когда в нём
-  // уже НАБРАНО (`data-dirty`): курсор в абзаце после щелчка-перемотки — ещё не правка.
+  // абзац, который правят на месте, замка не берёт — хватает фокуса в нём (`isContentEditable`).
   let locks = 0;
   const typing = () => {
     const doc = globalThis.document;
     const el = doc && doc.activeElement;
     const tag = el && el.tagName ? el.tagName.toLowerCase() : "";
-    if (tag === "input" || tag === "textarea") return true;
-    return Boolean(el && el.isContentEditable && el.getAttribute?.("data-dirty"));
+    return tag === "input" || tag === "textarea" || Boolean(el && el.isContentEditable);
   };
   const onScroll = () => {
     held = true;
