@@ -99,10 +99,12 @@ export function buildKaraoke(
    * перестройке правленого абзаца. Разойдись эти два места — и в правленой реплике перемотка
    * молча перестала бы работать, а заметили бы это через месяц.
    */
-  function seekOnClick(word, timeOf) {
+  function seekOnClick(word, timeOf, endOf = null) {
     word.addEventListener("click", (event) => {
       event.stopPropagation();
-      onSeek?.(timeOf());
+      // Конец слова — вторым аргументом: в режиме правки на паузе читалка проигрывает только
+      // это слово (`records/reader.js::seekFromText`).
+      onSeek?.(timeOf(), endOf ? endOf() : null);
       // В режиме правки щелчок ставит курсор — плашка «поделиться» легла бы поверх набора.
       if (!editing) offerShare(Math.floor(timeOf()), word);
     });
@@ -144,7 +146,7 @@ export function buildKaraoke(
       const width = (span * text.length) / total;
       const entry = { start: cursor, end: cursor + width, text, node: null };
       const word = el("span", { class: "kar-w kar-fresh", text });
-      seekOnClick(word, () => entry.start);
+      seekOnClick(word, () => entry.start, () => entry.end);
       entry.node = word;
       cursor += width;
       return entry;
@@ -375,7 +377,7 @@ export function buildKaraoke(
       // ⚠️ Перемотка по слову работает И В РЕЖИМЕ ПРАВКИ. Отключать её нельзя: правя реплику,
       // человек в первую очередь хочет её ПЕРЕСЛУШАТЬ, и отобранная перемотка мешает ровно
       // там, где она нужнее всего (правка владельца 08.09).
-      seekOnClick(word, () => start);
+      seekOnClick(word, () => start, () => end);
       (box || body).append(word, " ");
       flat.push({ start, end, node: word, text });
     }

@@ -543,13 +543,36 @@ export async function renderReader(id, sec = 0, {
     nudge(at);
   };
 
-  // Щелчок по слову. ⚠️ В режиме правки на ПАУЗЕ — только перемотка, без запуска (владелец,
-  // 02.10): правя, человек ставит паузу, щёлкает в текст, чтобы поставить курсор, — и запись
-  // снова играла. Перематываем без запуска, только если эта запись уже в плеере (у неё есть
-  // метаданные: `player.seek` без них не работает); иначе — прежний путь, `play` с места.
-  const seekFromText = (at) => {
+  // Щелчок по слову. ⚠️ В режиме правки на ПАУЗЕ — проиграть ТОЛЬКО это слово и снова встать
+  // (владелец, 02.10): правя, человек ставит паузу и щёлкает в текст — услышать слово, которое
+  // правит, а не запустить запись дальше. Конец ловим каждым кадром (`watchStop`), а не по
+  // событию времени плеера: оно приходит раз в четверть секунды, и запись успевала бы
+  // проглотить кусок следующего слова. Нет конца слова — просто перемотка без запуска.
+  let stopAt = null;
+  let stopFrom = 0;
+  let stopUntil = 0;
+  const watchStop = () => {
+    if (stopAt == null) return;
     const s = player.state();
+    // Ушли в другое место (стрелки, полоса, другая запись) или так и не заиграло — отбой:
+    // старый конец слова не имеет права поставить паузу посреди чужого места.
+    const away = s.playing && (s.time < stopFrom - 0.5 || s.time > stopAt + 1);
+    if (s.url !== src || away || performance.now() > stopUntil) { stopAt = null; return; }
+    if (s.playing && s.time >= stopAt) { player.pause(); stopAt = null; return; }
+    requestAnimationFrame(watchStop);
+  };
+  const seekFromText = (at, end = null) => {
+    const s = player.state();
+    stopAt = null;
     if (editMode && s.url === src && !s.playing && s.duration > 0) {
+      if (end != null && end > at) {
+        stopAt = end + 0.05;   // хвост в полсотни миллисекунд — иначе обрезает последний звук
+        stopFrom = at;
+        stopUntil = performance.now() + ((end - at) / (s.rate || 1)) * 1000 + 5000;
+        seekTo(at);
+        requestAnimationFrame(watchStop);
+        return;
+      }
       player.seek(at);
       place();
       nudge(at);
@@ -1057,7 +1080,8 @@ export async function renderReader(id, sec = 0, {
     // способ вернуться, если человек ушёл читать в сторону: поставил паузу,
     // пустил снова — и текст опять перед глазами. Плавно, чтобы было видно,
     // куда именно тебя вернули.
-    if (started && word) track?.jump(word, { smooth: !track.lost(word) });
+    // Проигрывание одного слова в правке страницу не двигает: курсор в тексте, правят там.
+    if (started && word && stopAt == null) track?.jump(word, { smooth: !track.lost(word) });
     else if (word) track?.follow(word);
 
     backToLive.toggleAttribute("hidden", !(s.playing && word && track?.lost(word)));

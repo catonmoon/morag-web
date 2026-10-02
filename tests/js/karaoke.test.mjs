@@ -522,6 +522,15 @@ check("щелчок вне абзацев снимает курсор, по те
   body.blur();
 });
 
+check("щелчок по слову отдаёт и конец слова — для проигрывания одного слова в правке", () => {
+  const got = [];
+  const k = buildKaraoke(TURNS, { onSeek: (at, end) => got.push([at, end]) });
+  const w = words(k)[1];
+  w._on.click({ stopPropagation() {} });
+  assert.equal(got.length, 1);
+  assert.ok(got[0][1] > got[0][0], `конец слова не после начала: ${got[0]}`);
+});
+
 check("в режиме подсветка по времени идёт как обычно", () => {
   assert.ok(ed.at(3.5), "подсветка в режиме правки погасла");
 });
