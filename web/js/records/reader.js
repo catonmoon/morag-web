@@ -543,6 +543,21 @@ export async function renderReader(id, sec = 0, {
     nudge(at);
   };
 
+  // Щелчок по слову. ⚠️ В режиме правки на ПАУЗЕ — только перемотка, без запуска (владелец,
+  // 02.10): правя, человек ставит паузу, щёлкает в текст, чтобы поставить курсор, — и запись
+  // снова играла. Перематываем без запуска, только если эта запись уже в плеере (у неё есть
+  // метаданные: `player.seek` без них не работает); иначе — прежний путь, `play` с места.
+  const seekFromText = (at) => {
+    const s = player.state();
+    if (editMode && s.url === src && !s.playing && s.duration > 0) {
+      player.seek(at);
+      place();
+      nudge(at);
+      return;
+    }
+    seekTo(at);
+  };
+
   let karaoke = null;
   let track = null;
   // Правки копятся здесь и уезжают ОДНОЙ пачкой по выходу из режима: иначе запись
@@ -552,7 +567,7 @@ export async function renderReader(id, sec = 0, {
   place(); // высота липкого блока известна сразу — имя должно висеть под ним с начала
   if (data.aligned && data.turns.length) {
     karaoke = buildKaraoke(data.turns, {
-      onSeek: seekTo,
+      onSeek: seekFromText,
       onShareAt: (at) => onShare?.(meta.id, at),
       onAsk: ASK_ENABLED ? (at) => onAsk?.(meta.id, Math.floor(at)) : undefined,
       onEdit: editing
