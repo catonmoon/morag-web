@@ -356,6 +356,9 @@ body[data-view="signin"] #user-wrap{display:none}
 .ptrack{flex:1;display:flex;flex-direction:column;gap:5px;min-width:0}
 .pbar{height:6px;border-radius:3px;background:var(--surface-2);position:relative;cursor:pointer;overflow:hidden}
 .pfill{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--accent-fill)}
+/* Сколько видео загружено вокруг текущего места — светлая подложка под полосой проигрывания. */
+.pbuf{position:absolute;left:0;top:0;bottom:0;width:0;background:color-mix(in srgb,var(--ink) 16%,transparent);
+      transition:width .3s ease-out}
 .ptime{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--ink-faint);font-variant-numeric:tabular-nums}
 /* Кнопки пульта «про документ» (расшифровка, слайды, карандаш) — спокойные: рамка без заливки,
    квадрат 34 px, при наведении акцент. Залитой была одна кнопка на весь пульт, и она читалась
@@ -1423,3 +1426,22 @@ body[data-view="chat"] .chat-tools{display:flex}
    ещё не видел. Не тревога, а факт, поэтому цвет приглушённый, а не красный. */
 .rec-waiting{font-family:var(--mono);font-size:10.5px;letter-spacing:.03em;color:var(--ink-faint);
   border:1px dashed var(--line);border-radius:6px;padding:0 5px;white-space:nowrap}
+
+/* Лента кадров под видео (владелец, 02.10): кадр, время, подпись; щелчок — к этому экрану.
+   Текущий экран — в цвете ветки (токены акцента красит `paintSection`). Кадры — в рамке
+   обложки (`ui/crop.js`), поэтому у картинки абсолютное позиционирование внутри обёртки. */
+.rd-strip{display:flex;gap:8px;overflow-x:auto;margin:10px 0 0;padding:2px 2px 8px;
+          scrollbar-width:thin;overscroll-behavior-x:contain}
+.rd-shot{flex:none;width:164px;padding:0;border:1px solid var(--line);border-radius:8px;
+         background:var(--surface);color:var(--ink-dim);cursor:pointer;text-align:left;
+         transition:border-color .15s,box-shadow .15s}
+.rd-shot:hover{border-color:var(--accent)}
+.rd-shot.on{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-wash);color:var(--ink)}
+.rd-shot-img{position:relative;aspect-ratio:16/9;overflow:hidden;border-radius:7px 7px 0 0;
+             background:var(--surface-2)}
+.rd-shot-img img{display:block;width:100%;height:100%;object-fit:cover}
+.rd-shot-cap{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+             padding:5px 7px 6px;font:12px/1.35 var(--sans)}
+.rd-shot-cap b{font:600 11px/1 var(--mono);color:var(--accent);margin-right:2px}
+@media (max-width:640px){.rd-shot{width:132px}}
+

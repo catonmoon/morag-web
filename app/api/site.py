@@ -284,7 +284,8 @@ async def record_frame(request: Request, record_id: str, name: str, slug: str | 
 
 @router.get("/records/{record_id}/frames")
 async def record_frames(request: Request, record_id: str, slug: str | None = None):
-    """Кадры экрана записи для слайдшоу на карточке (владелец, 14.09): имена кадров слайдов по
+    """Кадры экрана записи для слайдшоу на карточке (владелец, 14.09) и ленты кадров под видео
+    в читалке (владелец, 02.10): имена кадров слайдов по
     времени, БЕЗ кадров с людьми, и рамка обрезки обложки (`cover.crop.box`, доли исходного кадра:
     полоса миниатюр участников и подпись говорящего у записи одна на все кадры — фронт режет
     сырые кадры той же рамкой). Читается сайдкар по запросу — список записей от этого не пухнет."""
@@ -305,7 +306,11 @@ async def record_frames(request: Request, record_id: str, slug: str | None = Non
         if (s.get("people") and s.get("who") != "speaker") or not frame.startswith("slides/") or not frame.endswith(".jpg"):
             continue
         if corpus.index.file_of(meta, frame) is not None:
-            frames.append({"frame": frame, "t0": s.get("t0"), "title": ((s.get("desc") or {}).get("title") or "")[:80]})
+            desc = s.get("desc") or {}
+            # род экрана — подписи ленты кадров под видео («окно программы» вместо пустого
+            # заголовка); текст экрана сюда НЕ идёт: у демо-окон в нём чужие фамилии и почты
+            frames.append({"frame": frame, "t0": s.get("t0"), "t1": s.get("t1"),
+                           "kind": str(desc.get("kind") or "")[:20], "title": (desc.get("title") or "")[:80]})
     box = ((data.get("cover") or {}).get("crop") or {}).get("box")
     return {"frames": frames, "crop": box if isinstance(box, list) and len(box) == 4 else None}
 

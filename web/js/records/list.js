@@ -13,6 +13,7 @@ import { paintSection } from "../ui/theme.js";
 import { canvasMeasurer, hashSeed, layoutWords, letterMask } from "./letter-cloud.js";
 import { drive as driveHalo, haloOptions, withoutShadow } from "../ui/halo.js";
 import { coverUrl, getFrames, getRecords } from "../api.js";
+import { fitBox } from "../ui/crop.js";
 import {
   EMPTY, MULTI, SORTS, applyFilters, facet, fromQuery, hasValue, isEmpty, listOf, sortFor,
   sortRecords, subAxis, withValue,
@@ -458,22 +459,6 @@ function fetchFrames(id) {
     framesCache.set(id, getFrames(id).catch(() => ({ frames: [], crop: null })));
   }
   return framesCache.get(id);
-}
-
-/** Вписать рамку `box` (доли кадра) в обёртку так, чтобы она заполнила её целиком, как
- *  `object-fit: cover`, только для ПОДобласти кадра: считаем по натуральному размеру картинки. */
-function fitBox(img, wrap, box) {
-  const [x0, y0, x1, y1] = box;
-  const W = img.naturalWidth, H = img.naturalHeight;
-  if (!W || !H) return;
-  const bw = (x1 - x0) * W, bh = (y1 - y0) * H;
-  const scale = Math.max(wrap.clientWidth / bw, wrap.clientHeight / bh);
-  Object.assign(img.style, {
-    position: "absolute", objectFit: "fill", maxWidth: "none",
-    width: `${W * scale}px`, height: `${H * scale}px`,
-    left: `${-x0 * W * scale - (bw * scale - wrap.clientWidth) / 2}px`,
-    top: `${-y0 * H * scale - (bh * scale - wrap.clientHeight) / 2}px`,
-  });
 }
 
 function coverWithSlideshow(record) {

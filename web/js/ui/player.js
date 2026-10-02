@@ -201,6 +201,22 @@ export function cycleRate() {
 let pendingAt = null;
 let pendingPlay = false;
 
+/** До какой секунды видео загружено ВОКРУГ текущего места — подложка полосы плеера (владелец,
+ *  02.10: «показывать, сколько загрузилось»). Берём кусок, в котором стоит время, а не самый
+ *  дальний: после перемотки впереди может лежать старый кусок, а играть до него ещё нечего. */
+function bufferedEnd() {
+  try {
+    const t = video.currentTime;
+    const r = video.buffered;
+    for (let i = 0; i < r.length; i++) {
+      if (r.start(i) <= t + 0.5 && t <= r.end(i)) return r.end(i);
+    }
+  } catch {
+    /* нет данных — пусть будет ноль */
+  }
+  return 0;
+}
+
 function emit() {
   const state = {
     subs: subtitlesOn(),
@@ -214,6 +230,7 @@ function emit() {
     playing: !video.paused && !video.ended,
     time: video.currentTime,
     duration: Number.isFinite(video.duration) ? video.duration : 0,
+    buffered: bufferedEnd(),
     rate: video.playbackRate,
     title: meta.title,
     record: meta.record,
@@ -221,7 +238,7 @@ function emit() {
   for (const fn of listeners) fn(state);
 }
 
-for (const event of ["play", "pause", "ended", "timeupdate", "seeked", "loadedmetadata", "ratechange"]) {
+for (const event of ["play", "pause", "ended", "timeupdate", "seeked", "loadedmetadata", "ratechange", "progress"]) {
   video.addEventListener(event, emit);
 }
 video.addEventListener("error", () => {
@@ -402,6 +419,7 @@ export const state = () => ({
   playing: !video.paused && !video.ended,
   time: video.currentTime,
   duration: Number.isFinite(video.duration) ? video.duration : 0,
+  buffered: bufferedEnd(),
   rate: video.playbackRate,
   title: meta.title,
   record: meta.record,

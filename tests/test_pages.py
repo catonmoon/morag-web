@@ -68,7 +68,7 @@ def test_кадры_записи_для_слайдшоу_без_людей_и_с
         for n in (1, 2):
             (frames / f"s{n:03d}.jpg").write_bytes(b"\xff\xd8\xff")
         (rec / "record.slides.json").write_text(json.dumps({"slides": [
-            {"n": 1, "t0": 5.0, "frame": "slides/s001.jpg", "desc": {"title": "Титул"}},
+            {"n": 1, "t0": 5.0, "t1": 50.0, "frame": "slides/s001.jpg", "desc": {"title": "Титул", "kind": "slide", "text": "Секрет демо"}},
             {"n": 2, "t0": 60.0, "frame": "slides/s002.jpg", "people": True, "desc": {"title": "Люди"}},
             {"n": 3, "t0": 90.0, "frame": "slides/s003.jpg", "desc": {"title": "Нет файла"}},
             {"n": 4, "t0": 120.0, "frame": "../record.md", "desc": {"title": "Чужой путь"}},
@@ -76,6 +76,10 @@ def test_кадры_записи_для_слайдшоу_без_людей_и_с
         out = client.get(f"/api/records/{RECORD}/frames?slug={SLUG}").json()
         assert [f["frame"] for f in out["frames"]] == ["slides/s001.jpg"] and out["frames"][0]["title"] == "Титул"
         assert out["crop"] == [0, 0, 0.86, 0.94]
+        # ленте под видео — род и конец показа; текста экрана в ответе нет (у демо-окон там
+        # чужие фамилии и почты)
+        assert out["frames"][0]["kind"] == "slide" and out["frames"][0]["t1"] == 50.0
+        assert "Секрет демо" not in json.dumps(out, ensure_ascii=False)
     finally:
         shutil.rmtree(frames, ignore_errors=True)
         (rec / "record.slides.json").unlink(missing_ok=True)

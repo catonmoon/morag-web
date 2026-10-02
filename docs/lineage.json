@@ -636,6 +636,9 @@
     "web/js/ui/brand.js": {
       "status": "ours"
     },
+    "web/js/ui/crop.js": {
+      "status": "ours"
+    },
     "web/js/ui/dom.js": {
       "status": "edited",
       "sha256": "94d0607531fe76272033d2bb08f5b103e0857360e80a089306e47aa8bac21807"

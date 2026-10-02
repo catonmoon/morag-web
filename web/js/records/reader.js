@@ -19,7 +19,8 @@ import { vttUrl } from "./subs.js";
 import { isPauseKey, isSeekKey, nextTarget, prevTarget } from "./seek.js";
 import { createAskPanel } from "./ask-panel.js";
 import * as player from "../ui/player.js";
-import { getRecords, getWords, transcriptUrl, slidesUrl, mediaUrl,
+import { fitBox } from "../ui/crop.js";
+import { coverUrl, getFrames, getRecords, getWords, transcriptUrl, slidesUrl, mediaUrl,
          saveEdits, saveFields, promoteFix, getTokens, getVoicesQueue, getVoice,
          renameVoice } from "../api.js";
 
@@ -168,8 +169,11 @@ export async function renderReader(id, sec = 0, {
 
   // --- плеер (липкий: до паузы не надо мотать страницу вверх) -------------
   const playBtn = el("button", { class: "pbtn", html: PLAY, "aria-label": "Слушать" });
-  const bar = el("div", { class: "pbar" }, el("span", { class: "pfill" }));
+  // Подложка «загружено» — под полосой проигрывания (владелец, 02.10).
+  const bar = el("div", { class: "pbar" }, el("span", { class: "pbuf" }), el("span", { class: "pfill" }));
   const fill = bar.querySelector(".pfill");
+  const buf = bar.querySelector(".pbuf");
+  let lastBuf = -1;
   const now = el("span", { text: "0:00" });
   const total = el("span", { text: fmt(meta.duration_sec) });
   const speed = el("button", {
@@ -370,6 +374,9 @@ export async function renderReader(id, sec = 0, {
   const qa = presets
     ? createAskPanel({ record: meta, presets, onAskCorpus, onOpenRecord, onShareMoment: onShare })
     : null;
+  // Лента кадров под видео (владелец, 02.10: «скрины на таймлайне с подписями — удобно
+  // перематываться»). Пуста до прихода кадров и у записей без экрана — тогда не видна вовсе.
+  const strip = src ? el("div", { class: "rd-strip", hidden: "" }) : null;
   const body = el("div", { class: "rd-transcript" });
   // Кнопка возврата: висит внизу и появляется, ТОЛЬКО когда звучащее место
   // уехало с экрана. Иначе она мозолила бы глаза всё время чтения.
@@ -377,7 +384,7 @@ export async function renderReader(id, sec = 0, {
   // Пустые места отсеиваем ДО вставки: replaceChildren — нативный метод, он не
   // умеет пропускать null, а приводит его к строке и рисует текст «null».
   root.replaceChildren(
-    ...[back, head, src ? screen : null, dock,
+    ...[back, head, src ? screen : null, dock, strip,
         ask && el("div", { class: "rd-tools" }, ask), qa?.node, body, backToLive].filter(Boolean)
   );
   // ⚠️ Дорожку субтитров ставим ТОЛЬКО когда общий элемент играет НАШУ запись: пока звучит
@@ -1003,11 +1010,57 @@ export async function renderReader(id, sec = 0, {
   let pending = sec > 0 ? sec : null;
   const ARRIVED = 1.5; // с — попадание в запрошенное место
 
+  // --- лента кадров -----------------------------------------------------
+  // Кадр, время и подпись; щелчок — к этому экрану и в видео, и в тексте (как «‹‹ ››»). Кадр —
+  // через ту же рамку, что обложка (без полосы участников). Текущий экран подсвечен и сам
+  // подкручивается в ленте. Подпись — заголовок экрана, иначе его род; текста экрана нет:
+  // у демо-окон в нём чужие фамилии и почты.
+  const KIND = { slide: "слайд", app: "окно программы", browser: "браузер", terminal: "терминал",
+                 people: "докладчик", other: "экран" };
+  let shots = [];         // [{t0, node}] по времени
+  let shotOn = -1;
+  if (strip) {
+    getFrames(meta.id).then(({ frames = [], crop = null } = {}) => {
+      const list = frames.filter((f) => Number.isFinite(f.t0)).sort((a, b) => a.t0 - b.t0);
+      if (list.length < 2) return;     // один кадр — не лента, а обложка
+      shots = list.map((f) => {
+        const img = el("img", { src: coverUrl(meta.id, f.frame), alt: "", loading: "lazy" });
+        const box = el("div", { class: "rd-shot-img" }, img);
+        if (crop) img.addEventListener("load", () => fitBox(img, box, crop));
+        const node = el("button", { class: "rd-shot", title: f.title || "" }, box,
+          el("span", { class: "rd-shot-cap" },
+            el("b", { text: fmt(f.t0) }), ` ${f.title || KIND[f.kind] || "экран"}`));
+        node.addEventListener("click", () => { seekTo(f.t0); reveal(f.t0); });
+        return { t0: f.t0, node };
+      });
+      strip.replaceChildren(...shots.map((x) => x.node));
+      strip.removeAttribute("hidden");
+      markShot(player.state().url === src ? player.state().time : sec || 0);
+    }).catch(() => {});
+  }
+  /** Подсветить экран, который на видео сейчас, и подкрутить ленту к нему (без плавности). */
+  function markShot(time) {
+    if (!shots.length) return;
+    let i = -1;
+    for (let k = 0; k < shots.length && shots[k].t0 <= time + 0.5; k++) i = k;
+    if (i === shotOn) return;
+    shots[shotOn]?.node.classList.remove("on");
+    shotOn = i;
+    const node = shots[i]?.node;
+    if (!node) return;
+    node.classList.add("on");
+    const left = node.offsetLeft - strip.offsetLeft, right = left + node.offsetWidth;
+    if (left < strip.scrollLeft || right > strip.scrollLeft + strip.clientWidth) {
+      strip.scrollLeft = Math.max(0, left - strip.clientWidth / 3);
+    }
+  }
+
   const unsubscribe = player.subscribe((s) => {
     // Звучит ЭТА запись — по адресу: включить её могла и карточка-момент из панели. Кадр, кнопка
     // пуска, полоса и часы живут по адресу; караоке и слежение — только когда владелец читалка.
     const sounding = s.url === src;
     const mine = sounding && s.owner === `rd:${meta.id}`;
+    if (sounding) markShot(s.time);
     if ((sounding && s.playing) !== wasBtnPlaying) {
       wasBtnPlaying = sounding && s.playing;
       // Встали — запоминаем место; заиграло — якорь больше не нужен.
@@ -1046,6 +1099,11 @@ export async function renderReader(id, sec = 0, {
     if (Math.abs(width - lastWidth) > 0.05) {
       fill.style.width = `${width}%`;
       lastWidth = width;
+    }
+    const loaded = Math.max(0, Math.min(1, (s.buffered || 0) / length)) * 100;
+    if (Math.abs(loaded - lastBuf) > 0.2) {
+      buf.style.width = `${loaded}%`;
+      lastBuf = loaded;
     }
     const clock = fmt(s.time);
     if (clock !== lastClock) {
