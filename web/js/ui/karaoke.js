@@ -210,9 +210,39 @@ export function buildKaraoke(
     onEdit?.(i, was, text);
   }
 
+  /** Попал ли щелчок в строки текста абзаца, а не на пустое место рядом с ними. Нечем
+   * измерить (тесты, старый браузер) — считаем, что попал: так ведёт себя браузер и без нас. */
+  function overText(body, x, y) {
+    const doc = globalThis.document;
+    if (!doc || typeof doc.createRange !== "function") return true;
+    const range = doc.createRange();
+    range.selectNodeContents(body);
+    for (const r of range.getClientRects()) {
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true;
+    }
+    return false;
+  }
+
+  /** Снять курсор из абзаца: уход из абзаца и есть «применить» (см. `blur`). */
+  function dropCaret() {
+    if (active >= 0) paragraphs[active]?.body.blur();
+    globalThis.getSelection?.()?.removeAllRanges?.();
+  }
+
   function editable(i) {
     const para = paragraphs[i];
     const body = para.body;
+    // ⚠️⚠️ Щелчок СБОКУ от строк курсор не ставит, а снимает (владелец, 02.10). Абзац — блок во
+    // всю ширину колонки, и браузер, поймав щелчок справа или слева от текста, ставил курсор в
+    // ближайшую позицию: курсор оставался в абзаце, а пока он там, слежение за словом стоит —
+    // человек ничего не правил, а страница не листалась. Курсор переставляет только щелчок по
+    // ТЕКСТУ абзаца (этого или другого).
+    body.addEventListener("mousedown", (event) => {
+      if (!editing || event.target !== body) return;
+      if (overText(body, event.clientX, event.clientY)) return;
+      event.preventDefault();
+      dropCaret();
+    });
     body.addEventListener("focus", () => {
       if (!editing) return;
       hideShare(); // плашка «поделиться» висела бы поверх набираемого текста
@@ -468,6 +498,15 @@ export function buildKaraoke(
     return next < flat.length ? flat[next] : flat[flat.length - 1];
   }
 
+
+  // Щелчок вне абзацев (поля, шапки реплик, кнопки времени) — тоже уход из абзаца.
+  node.addEventListener("mousedown", (event) => {
+    if (!editing || active < 0) return;
+    for (let n = event.target; n && n !== node; n = n.parentElement) {
+      if (n.classList?.contains("kar-text")) return;
+    }
+    dropCaret();
+  });
   return {
     node,
     at,
