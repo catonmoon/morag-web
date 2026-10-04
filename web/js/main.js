@@ -85,6 +85,9 @@ initAnalytics(site?.analytics || {});
 mountUserMenu(me);
 // Знак — из бренда пространства, у витрины — её; форма входа получит свой от сервера входа.
 if (!onSignin) showMark(site?.brand || hubData?.hub || {});
+// Календарь выключен в site.yml (`content.calendar: false`) — кнопки нет в шапке.
+const noCalendar = site?.calendar === false;
+if (noCalendar) document.getElementById("go-calendar")?.remove();
 
 /** Ссылка на место в записи — то, чем делятся. Слаг корпуса в ней обязателен. */
 const shareMoment = (recordId, sec) =>
@@ -101,7 +104,8 @@ const router = createRouter(
     // Страница раздачи приложения: сюда ведёт пункт меню у тех, кому можно грузить записи.
     upload: () => renderUpload().catch(fail),
     // Календарь выступлений: год — в адресе, чтобы им можно было поделиться.
-    calendar: (year) =>
+    // Выключен — адрес ведёт на главную, а не на пустую страницу.
+    calendar: (year) => noCalendar ? router.go({ view: "home" }, { replace: true }) :
       renderCalendar(year, {
         onOpen: (id) => router.go({ view: "reader", id }),
         // Год — `replace`: адресом делятся, а историю он не засоряет (см. router.back).

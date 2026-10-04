@@ -40,6 +40,9 @@ export function showMark(brand = {}) {
   stopIdle = startIdle(acts, { disabled: reducedMotion() });
   const logo = $(".logo");
   if (logo) {
+    // Маленький знак стоит рядом со словом как ещё одно слово: зазор — ровно пробел рамочного
+    // шрифта, в колонках (`ch` того же кегля), а не CSS-зазор (владелец, 04.10).
+    logo.style.gap = wordSize ? `${boxfont.spaceCols()}ch` : "";
     logo.dataset.cols = field.cols;
     logo.dataset.rows = field.rows;
     logo.classList.toggle("no-art", !art);

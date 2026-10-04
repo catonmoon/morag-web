@@ -109,4 +109,5 @@ routing:
 `content.blurb` — длина сводки для карточки (`tools/make_blurb.py`): `{sentences, words,
 material, max_tokens}`, умолчание — «2-3 предложения, 40-70 слов». `reader` — моменты экрана в
 читалке: `frames: strip | timeline` (лента под видео или метки на полосе плеера) и
-`frames_text: true`, если текст экрана можно показывать посетителю.
+`frames_text: true`, если текст экрана можно показывать посетителю. `content.calendar: false` — без
+календаря выступлений (кнопка в шапке и адрес `/calendar` уводят на главную).

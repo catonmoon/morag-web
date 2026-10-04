@@ -848,6 +848,8 @@ class Corpus:
             # Тексты доменные, поэтому живут в конфиге корпуса, а не в коде фронта.
             "ask_presets": _presets_public((self.chat or {}).get("presets")),
             "reader": dict(self.reader),
+            # Календарь выступлений — для встреч с датами; курсу лекций он не нужен (владелец, 04.10).
+            "calendar": bool((self.raw.get("content") or {}).get("calendar", True)),
         }
 
 

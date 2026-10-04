@@ -62,3 +62,8 @@ export function render(text) {
 export function width(text) {
   return render(text)[0].length;
 }
+
+/** Пробел между словами набора, в клетках: разделитель + глиф пробела + разделитель. */
+export function spaceCols() {
+  return width("A A") - 2 * width("A");
+}

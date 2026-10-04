@@ -36,3 +36,10 @@ assert.deepEqual(g0, { field: { cols: width("MORAG"), rows: 3 }, ox: 0, oy: 0, s
 assert.deepEqual(artSize(null), { cols: 0, rows: 0 });
 
 console.log("boxfont: ок");
+
+// Пробел между словами — 3 клетки (разделитель + пробел + разделитель): этим же зазором шапка
+// отделяет маленький знак от слова (`brand.mark_size: word`).
+{
+  const { spaceCols } = await import("../../web/js/ui/boxfont.js");
+  assert.equal(spaceCols(), 3);
+}
