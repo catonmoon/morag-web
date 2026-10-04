@@ -604,14 +604,27 @@ def drop_degenerate(x: dict) -> int:
             joined.append(w[0])
             pos += len(w[0]) + 1
         text = " ".join(joined)
-        cut = set()
+        cut, retext = set(), {}
         for m in DEGEN_RUN.finditer(text):
             keep_end = m.start() + len(m.group(1))
+            kept = [i for i, off in enumerate(offsets) if m.start() <= off < keep_end]
             for i, off in enumerate(offsets):
                 if keep_end <= off < m.end():
                     cut.add(i)
+            # ⚠️ Текст после замены — `group(1)` + всё, что шло за концом повтора, то есть ХВОСТ
+            # ПОСЛЕДНЕГО повтора («нет, нет, нет, нет. Дальше» → «нет. Дальше»). Слово, которое
+            # остаётся во временах, обязано получить тот же хвост, иначе в тексте «нет.», а в
+            # словах «нет,» — и `split_long_turns` молча перестаёт резать реплику на абзацы.
+            # Ловилось 04.10 на лекции из ОДНОЙ реплики: вся читалка стала одной простынёй.
+            if kept:
+                last = kept[-1]
+                straddle = next((i for i, off in enumerate(offsets)
+                                 if off < m.end() < off + len(joined[i])), None)
+                tail = joined[straddle][m.end() - offsets[straddle]:] if straddle is not None else ""
+                retext[last] = text[offsets[last]:keep_end] + tail
         if cut:
-            turn["words"] = [w for i, w in enumerate(ws) if i not in cut]
+            turn["words"] = [[retext[i], *w[1:]] if i in retext else w
+                             for i, w in enumerate(ws) if i not in cut]
     return removed
 
 

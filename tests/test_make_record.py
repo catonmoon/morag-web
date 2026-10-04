@@ -403,6 +403,26 @@ def test_words_lose_exactly_the_dropped_tokens():
     assert x["turns"][0]["text"] == "Извание дальше"
 
 
+def test_collapsed_punctuation_matches_between_text_and_words():
+    """Повтор с пунктуацией: текст получает хвост ПОСЛЕДНЕГО повтора («нет.»), и оставшееся
+    слово во временах обязано получить его же. Разойдись они на одной запятой —
+    `split_long_turns` молча не режет реплику, и запись из одной реплики становится простынёй
+    (ловилось 04.10 на лекции без вопросов из зала)."""
+    from make_record import drop_degenerate, split_head, split_long_turns
+    said = "Кузнецова бы сказала, нет, нет, нет, нет. Ковалёв отвечает, да, да, да, да дальше"
+    toks = said.split()
+    ws = [[w, i * 0.4, i * 0.4 + 0.3] for i, w in enumerate(toks)]
+    x = {"markdown": f"---\ntitle: x\n---\n\n[S] <!-- t:0.0 --> {said}",
+         "turns": [{"text": said}], "words": {"turns": [{"start": 0.0, "end": ws[-1][2], "words": ws}]}}
+    drop_degenerate(x)
+    _, body = split_head(x["markdown"])
+    text = body.split("-->", 1)[1].split()
+    assert [w[0] for w in x["words"]["turns"][0]["words"]] == text, text
+    assert " ".join(text) == "Кузнецова бы сказала, нет. Ковалёв отвечает, да дальше"
+    # и разрез по-прежнему видит согласованную реплику (порог нулевой — режет на любой паузе)
+    assert split_long_turns(x, target=0.5) > 0
+
+
 def test_clean_record_is_untouched():
     """На чистой записи функция не должна менять ни текста, ни времён."""
     from make_record import drop_degenerate
