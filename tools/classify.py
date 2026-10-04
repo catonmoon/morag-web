@@ -288,6 +288,7 @@ def load_env() -> dict:
     if not (base and model and key):
         sys.exit(f"нет адреса/модели/ключа LLM: ASR_LLM_BASE_URL, ASR_LLM_MODEL, OR_KEY в {env_file}")
     return {"base_url": base, "model": model, "api_key": key,
+            "proxy": next((values[v] for v in ("HTTPS_PROXY", "https_proxy") if values.get(v)), None),
             "repo": os.environ.get("MORAG_REPO") or values.get("MORAG_REPO") or ""}
 
 
@@ -357,7 +358,9 @@ async def classify_many(inputs: list[dict], tax: dict) -> list[dict]:
     categories = category_names(tax)
     sem = asyncio.Semaphore(CONCURRENCY)
     done = 0
-    client = httpx.AsyncClient(timeout=180, trust_env=False)
+    # ⚠️ `trust_env=False` — окружение (а с ним и прокси оболочки) клиенту не указ; прокси контура,
+    # объявленный в файле стека, передаём ЯВНО. Без этого публичный шлюз отвечал 403 (04.10).
+    client = httpx.AsyncClient(timeout=180, trust_env=False, proxy=env.get("proxy"))
 
     async def one(inp):
         nonlocal done

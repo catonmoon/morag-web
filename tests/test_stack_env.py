@@ -88,3 +88,16 @@ def test_classify_prefers_text_model(stack, monkeypatch):
     assert classify.load_env()["model"] == "vendor/text-flash"
     stack("ASR_LLM_BASE_URL=https://gateway.example.com/v1\nOR_KEY=k\nASR_LLM_MODEL=vendor/stage-model\n")
     assert classify.load_env()["model"] == "vendor/stage-model"
+
+
+def test_classify_client_gets_stack_proxy(stack):
+    """classify строит клиент с `trust_env=False` — прокси из окружения он не видит; прокси
+    контура обязан приехать в клиент параметром (ловилось 04.10: 403 от публичного шлюза)."""
+    import classify
+    stack("ASR_LLM_BASE_URL=https://gateway.example.com/v1\nOR_KEY=k\nASR_LLM_MODEL=m\n"
+          "HTTPS_PROXY=http://contour-proxy:3128\n")
+    assert classify.load_env()["proxy"] == "http://contour-proxy:3128"
+    stack("ASR_LLM_BASE_URL=https://llm.example.org/api\nOR_KEY=k\nASR_LLM_MODEL=m\n")
+    assert classify.load_env()["proxy"] is None
+    src = (Path(__file__).resolve().parents[1] / "tools" / "classify.py").read_text(encoding="utf-8")
+    assert 'proxy=env.get("proxy")' in src
