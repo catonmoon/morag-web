@@ -243,6 +243,14 @@ def route(record_id: str, *, event: str, tags: list[str] | None = None,
         return found
     base = records_dir(space_of(event, tags, family), family)
     branch, sub = branch_of(event, tags, family), sub_of(event, tags, date, family)
+    # ⚠️ Ветка и второй уровень — ОДИН каталог каждый. Косая черта в имени («А/Б-тесты») молча
+    # делает лишний уровень: ветка читается с диска как «А», роли ветки не находятся, а сайт и
+    # индексатор видят раздел, которого никто не заводил (ловилось 04.10). Отказ, а не замена:
+    # имя ветки видно людям, выбрать его должен человек.
+    for name in (branch, sub):
+        if name and ("/" in name or "\\" in name):
+            raise ValueError(f"имя ветки или раздела {name!r} с косой чертой — это лишний уровень "
+                             f"каталогов; переименуйте правило в hub.yml::routing")
     return base / branch / sub / record_id if branch and sub else base / record_id
 
 

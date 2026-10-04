@@ -364,3 +364,20 @@ def test_reading_direction_of_a_section_is_carried_to_the_front(tmp_path: Path):
                      section_order={"Курс": "asc"})
 
     assert index.section_order == {"Курс": "asc"}
+
+
+def test_routing_refuses_slash_in_branch_name(tmp_path: Path):
+    """«А/Б-тесты» как имя ветки — это ДВА каталога: ветка читается с диска как «А», роли ветки не
+    находятся, раздел появляется сам собой (ловилось 04.10). Раскладка отказывает, а не чинит молча."""
+    fam = tmp_path / "fam"
+    (fam / "spaces" / "talks" / "records").mkdir(parents=True)
+    (fam / "spaces" / "talks" / "site.yml").write_text("slug: talks\n", encoding="utf-8")
+    (fam / "names.json").write_text("{}", encoding="utf-8")
+    hub = ("spaces:\n  - slug: talks\n    dir: spaces/talks\n"
+           "routing:\n  - match: {event_prefix: \"Курс\"}\n    space: talks\n    branch: \"{b}\"\n    sub: \"2024\"\n")
+    (fam / "hub.yml").write_text(hub.replace("{b}", "Kafka/Postgres"), encoding="utf-8")
+    with pytest.raises(ValueError, match="косой чертой"):
+        spaces.route("2024-01-01-x", event="Курс", date="2024-01-01", family=fam)
+    (fam / "hub.yml").write_text(hub.replace("{b}", "Kafka и Postgres"), encoding="utf-8")
+    got = spaces.route("2024-01-01-x", event="Курс", date="2024-01-01", family=fam)
+    assert got.parts[-3:] == ("Kafka и Postgres", "2024", "2024-01-01-x")
