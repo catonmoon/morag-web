@@ -593,7 +593,7 @@ def _halo_fields(raw: dict) -> dict:
 # Что пространство наследует от витрины, если не задало своё: картинка обложки, знак (рисунок
 # и клетки мордочки) и слово в шапке. Один рисунок на весь сайт, копия у каждого пространства —
 # лишнее место, где он разойдётся.
-INHERITED_BRAND = ("cover", "mark", "mark_face", "wordmark")
+INHERITED_BRAND = ("cover", "mark", "mark_face", "mark_size", "wordmark")
 MARK_MAX_ROWS, MARK_MAX_COLS = 40, 160
 
 
@@ -638,6 +638,10 @@ def mark_payload(brand: dict, find_file) -> dict | None:
     if snout and cell(snout.get("row"), 0, rows) is not None and cell(snout.get("col"), 0, cols) is not None:
         if isinstance(snout.get("calm"), str) and isinstance(snout.get("sniff"), str):
             out["snout"] = {"row": snout["row"], "col": snout["col"], "calm": snout["calm"], "sniff": snout["sniff"]}
+    # Кегль знака: по умолчанию 4 px — подробный рисунок (десятки колонок) в шапку; `word` — кеглем
+    # слова, для маленького знака в несколько строк (как кот морага рядом с надписью).
+    if brand.get("mark_size") == "word":
+        out["size"] = "word"
     return out
 
 

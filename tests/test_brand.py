@@ -164,3 +164,12 @@ def test_пространство_наследует_знак_и_слово_от
     (space / "site.yml").write_text("slug: s\nbrand:\n  wordmark: OWN\n", encoding="utf-8")
     own = Corpus(space, shared_brand_dir=hub_brand, inherit={"wordmark": "DEMO"})
     assert own.public()["brand"]["wordmark"] == "OWN", "своё слово важнее общего"
+
+
+def test_маленький_знак_кеглем_слова(tmp_path):
+    """`mark_size: word` — знак в несколько строк рядом со словом его же кеглем; без ключа —
+    прежний мелкий кегль подробного рисунка (поле `size` не появляется)."""
+    root = _art(tmp_path)
+    assert mark_payload({"mark": "mark.txt", "mark_size": "word"}, lambda name: root / name)["size"] == "word"
+    assert "size" not in mark_payload({"mark": "mark.txt"}, lambda name: root / name)
+    assert "size" not in mark_payload({"mark": "mark.txt", "mark_size": "огромный"}, lambda name: root / name)

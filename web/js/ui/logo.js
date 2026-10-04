@@ -27,9 +27,12 @@ export function showMark(brand = {}) {
   stopIdle();
   const art = brand.mark && Array.isArray(brand.mark.lines) ? brand.mark : null;
   const lines = boxfont.render(brand.wordmark || DEFAULT_WORDMARK);
-  const { field, ox, oy, sx, sy } = layout(art, lines, art ? SCALE : 1);
+  // `size: word` — знак кеглем слова (маленький рисунок в несколько строк): клетки совпадают.
+  const wordSize = art?.size === "word";
+  const { field, ox, oy, sx, sy } = layout(art, lines, art && !wordSize ? SCALE : 1);
   acts = renderMark(markHost, field, art);
   markHost.hidden = !art;
+  markHost.classList.toggle("word-size", wordSize);
   renderText(wordHost, lines, field, { ox, oy, sx, sy });
   // Подпись под словом: у корпуса со своим словом — «morag» (на чём сделано), у платформы — «web».
   const sub = $(".logo-word em");
