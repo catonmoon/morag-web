@@ -20,6 +20,7 @@ import { isPauseKey, isSeekKey, nextTarget, prevTarget } from "./seek.js";
 import { createAskPanel } from "./ask-panel.js";
 import * as player from "../ui/player.js";
 import { fitBox } from "../ui/crop.js";
+import { cardLeft, markAt, marksOf, pickMark } from "./marks.js";
 import { coverUrl, getFrames, getRecords, getWords, transcriptUrl, slidesUrl, mediaUrl,
          saveEdits, saveFields, promoteFix, getTokens, getVoicesQueue, getVoice,
          renameVoice } from "../api.js";
@@ -91,6 +92,9 @@ export async function renderReader(id, sec = 0, {
   // Вопрос к этой записи: набор кнопок из конфига корпуса и уход в общий разговор по снятой
   // галочке. Пусто — панели не будет вовсе (у пространства выключен поиск, например).
   presets = null, onAskCorpus = null, onOpenRecord = null,
+  // Моменты экрана: `strip` — лента кадров под видео, `timeline` — метки на полосе плеера с
+  // карточкой при наведении (site.yml `reader.frames`, владелец 04.10).
+  frames: framesMode = "strip",
 } = {}) {
   const root = $("#reader");
 
@@ -342,6 +346,23 @@ export async function renderReader(id, sec = 0, {
   const screen = el("div", { class: "vscreen" });
   // Субтитры и полный экран — НА КАДРЕ, в правом нижнем углу (владелец, 14.09), видны при
   // наведении. Слой абсолютный: `place()` меряет высоту кадра, и оверлей её менять не должен.
+  // Метки экранов на полосе — только там, где есть наведение мышью (владелец, 04.10: «на телефоне
+  // меток нет»): карточка по наведению на таче не открылась бы, а тап по полосе обязан остаться
+  // перемоткой.
+  // ⚠️ Карточка — `position:fixed` в `body`, а не внутри дока: док липкий, над ним липкое видео
+  // (z 11), под ним затемнение-переход, и любая абсолютная карточка внутри этого стека где-нибудь
+  // да оказывалась под чужим слоем (замерено 04.10: поперёк карточки — полоса). Вне стека — ни
+  // одного соседа сверху; место считается от полосы при каждом движении мыши.
+  const timeline = Boolean(src) && framesMode === "timeline"
+    && globalThis.matchMedia?.("(hover: hover) and (pointer: fine)").matches;
+  document.querySelectorAll("body > .pcard, body > .pside").forEach((n) => n.remove()); // прошлой записи
+  // Кадр с временем и заголовком — над полосой, поверх видео (владелец, 04.10: «вверху, а не
+  // вниз»); текст экрана — СБОКУ от видео, справа или слева, где влезает; нигде — под кадром.
+  const card = timeline ? el("div", { class: "pcard", hidden: "" }) : null;
+  const side = timeline ? el("div", { class: "pside", hidden: "" }) : null;
+  if (card) document.body.append(card, side);
+  const ptrack = el("div", { class: "ptrack" },
+    ...[src ? jumps : null, bar, el("div", { class: "ptime" }, now, total)].filter(Boolean));
   // Клик по кадру — это пауза (player.js), поэтому кнопки гасят всплытие (см. обработчики).
   screen.append(el("div", { class: "vover" }, subs, full));
   const controls = el(
@@ -351,7 +372,7 @@ export async function renderReader(id, sec = 0, {
       // Пуск слева; над полосой — крошечные «‹‹ ››» перемотки по абзацам (владелец, 14.09).
       // Субтитры и полный экран уехали НА КАДР (`overlay`).
       src ? playBtn : null,
-      el("div", { class: "ptrack" }, ...[src ? jumps : null, bar, el("div", { class: "ptime" }, now, total)].filter(Boolean)),
+      ptrack,
       src ? speed : null,
       slides,
       download,
@@ -376,7 +397,7 @@ export async function renderReader(id, sec = 0, {
     : null;
   // Лента кадров под видео (владелец, 02.10: «скрины на таймлайне с подписями — удобно
   // перематываться»). Пуста до прихода кадров и у записей без экрана — тогда не видна вовсе.
-  const strip = src ? el("div", { class: "rd-strip", hidden: "" }) : null;
+  const strip = src && framesMode !== "timeline" ? el("div", { class: "rd-strip", hidden: "" }) : null;
   const body = el("div", { class: "rd-transcript" });
   // Кнопка возврата: висит внизу и появляется, ТОЛЬКО когда звучащее место
   // уехало с экрана. Иначе она мозолила бы глаза всё время чтения.
@@ -989,9 +1010,10 @@ export async function renderReader(id, sec = 0, {
   speed.addEventListener("click", () => {
     speed.textContent = rateLabel(player.cycleRate());
   });
+  let snapTo = null;   // щелчок рядом с риской экрана — к началу этого экрана (см. метки ниже)
   bar.addEventListener("click", (event) => {
     const box = bar.getBoundingClientRect();
-    const at = Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)) * meta.duration_sec;
+    const at = snapTo ?? Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)) * meta.duration_sec;
     seekTo(at);
     reveal(at); // перемотал полосой — текст обязан приехать следом
   });
@@ -1038,8 +1060,87 @@ export async function renderReader(id, sec = 0, {
       markShot(player.state().url === src ? player.state().time : sec || 0);
     }).catch(() => {});
   }
+  // --- метки экранов на полосе плеера (режим `timeline`) ------------------------------
+  // Риска на начале каждого экрана; наведение — карточка: кадр (той же рамкой, что обложка),
+  // время, заголовок и текст экрана (если пространство разрешило его отдавать). Щелчок рядом с
+  // риской — к началу экрана: в риску в 2 px мышью не попасть.
+  let marks = [];
+  let ticks = [];
+  let tickOn = -1;
+  let cardFor = -1;
+  const hideCard = () => {
+    if (card) { card.hidden = true; side.hidden = true; }
+    snapTo = null;
+    bar.classList.remove("snap");
+  };
+  if (timeline) {
+    getFrames(meta.id).then(({ frames = [], crop = null } = {}) => {
+      marks = marksOf(frames, meta.duration_sec);
+      if (!marks.length) return;
+      ticks = marks.map((m) => el("i", { class: "pmark", style: `left:${(m.left * 100).toFixed(3)}%` }));
+      bar.append(...ticks);
+      const img = el("img", { alt: "" });
+      const pic = el("div", { class: "pcard-img" }, img);
+      const cap = el("div", { class: "pcard-cap" });
+      const text = el("div", { class: "pcard-text" });   // под кадром — когда сбоку не влезло
+      card.replaceChildren(pic, cap, text);
+      if (crop) img.addEventListener("load", () => fitBox(img, pic, crop));
+      const show = (i, x, box) => {
+        if (i !== cardFor) {
+          const m = marks[i];
+          img.src = coverUrl(meta.id, m.frame);
+          cap.replaceChildren(el("b", { text: fmt(m.t0) }), ` ${m.title || KIND[m.kind] || "экран"}`);
+          side.replaceChildren(el("div", { class: "pside-cap" }, el("b", { text: fmt(m.t0) }),
+            ` ${m.title || KIND[m.kind] || "экран"}`), el("div", { class: "pside-text", text: m.text || "" }));
+          cardFor = i;
+        }
+        const pad = 8, gap = 16, sideW = 300;
+        // Текст — сбоку от видео: справа, иначе слева; нигде не влезло — под кадром в карточке.
+        const v = (screen.isConnected ? screen : bar).getBoundingClientRect();
+        const right = innerWidth - v.right - gap - pad, left = v.left - gap - pad;
+        const where = !marks[i].text ? "none" : right >= 220 ? "right" : left >= 220 ? "left" : "card";
+        text.textContent = where === "card" ? marks[i].text : "";
+        text.hidden = where !== "card";
+        side.hidden = !(where === "right" || where === "left");
+        if (!side.hidden) {
+          const w = Math.min(sideW, where === "right" ? right : left);
+          side.style.width = `${w}px`;
+          side.style.left = `${where === "right" ? v.right + gap : v.left - gap - w}px`;
+          side.style.top = `${Math.max(pad, v.top)}px`;
+        }
+        card.hidden = false;
+        const w = card.offsetWidth || 280, h = card.offsetHeight || 200;
+        card.style.left = `${pad + cardLeft(x - pad, w, innerWidth - 2 * pad)}px`;
+        // Вверх, над полосой — туда, где видео; у самого верха экрана места нет — под полосу.
+        const above = box.top - h - pad;
+        card.style.top = `${above >= pad ? above : box.bottom + pad}px`;
+      };
+      bar.addEventListener("pointermove", (event) => {
+        if (event.pointerType && event.pointerType !== "mouse") return;
+        const box = bar.getBoundingClientRect();
+        const frac = Math.max(0, Math.min(1, (event.clientX - box.left) / box.width));
+        const { index, snap } = pickMark(marks, frac, box.width, meta.duration_sec);
+        snapTo = snap ? marks[index].t0 : null;
+        bar.classList.toggle("snap", snap);
+        if (index < 0) { card.hidden = true; return; }
+        show(index, event.clientX, box);
+      });
+      bar.addEventListener("pointerleave", hideCard);
+      addEventListener("scroll", hideCard, { passive: true });
+      markShot(player.state().url === src ? player.state().time : sec || 0);
+    }).catch(() => {});
+  }
+
   /** Подсветить экран, который на видео сейчас, и подкрутить ленту к нему (без плавности). */
   function markShot(time) {
+    if (ticks.length) {
+      const i = markAt(marks, time);
+      if (i !== tickOn) {
+        ticks[tickOn]?.classList.remove("on");
+        ticks[i]?.classList.add("on");
+        tickOn = i;
+      }
+    }
     if (!shots.length) return;
     let i = -1;
     for (let k = 0; k < shots.length && shots[k].t0 <= time + 0.5; k++) i = k;
@@ -1180,6 +1281,9 @@ export async function renderReader(id, sec = 0, {
     dispose() {
       qa?.dispose();
       unsubscribe();
+      card?.remove();                                  // карточка момента и текст живут в body
+      side?.remove();
+      removeEventListener("scroll", hideCard);
       // ⚠️ Освобождаем blob-адрес дорожки: он живёт до перезагрузки страницы, а записей за
       // сессию открывают десятки.
       if (subsArmed) player.setSubtitles("");

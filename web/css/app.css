@@ -1445,3 +1445,28 @@ body[data-view="chat"] .chat-tools{display:flex}
 .rd-shot-cap b{font:600 11px/1 var(--mono);color:var(--accent);margin-right:2px}
 @media (max-width:640px){.rd-shot{width:132px}}
 
+/* Метки экранов на полосе плеера (режим `timeline`, владелец 04.10). Риска — внутри полосы
+   (у неё overflow:hidden, а риска и не должна вылезать). Карточка — fixed в body, вне липкого
+   стека дока (там она оказывалась под чужими слоями); место считает reader.js от полосы.
+   Только с мышью: на таче меток нет вовсе. */
+.pmark{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--ink-faint);
+       opacity:.7;pointer-events:none}
+.pmark.on{background:var(--accent);opacity:1}
+.pbar.snap{cursor:pointer}
+.pcard{position:fixed;top:0;left:0;width:280px;z-index:30;pointer-events:none;
+       background:var(--surface);border:1px solid var(--line);border-radius:10px;
+       box-shadow:var(--shadow);padding:6px;color:var(--ink-dim)}
+.pcard-img{position:relative;aspect-ratio:16/9;overflow:hidden;border-radius:7px;background:var(--surface-2)}
+.pcard-img img{display:block;width:100%;height:100%;object-fit:cover}
+.pcard-cap{padding:6px 4px 2px;font:600 12.5px/1.35 var(--sans);color:var(--ink);overflow-wrap:anywhere}
+.pcard-cap b{font:600 11px/1 var(--mono);color:var(--accent);margin-right:3px}
+.pcard-text{padding:2px 4px 3px;font:12px/1.4 var(--sans);overflow-wrap:anywhere;
+            display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
+.pside{position:fixed;top:0;left:0;z-index:30;pointer-events:none;max-height:70vh;overflow:hidden;
+       background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);
+       padding:10px 12px;color:var(--ink-dim)}
+.pside-cap{font:600 13px/1.35 var(--sans);color:var(--ink);margin-bottom:6px;overflow-wrap:anywhere}
+.pside-cap b{font:600 11px/1 var(--mono);color:var(--accent);margin-right:3px}
+.pside-text{font:12.5px/1.5 var(--sans);overflow-wrap:anywhere}
+@media (hover:none),(pointer:coarse){.pmark,.pcard,.pside{display:none}}
+

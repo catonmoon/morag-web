@@ -683,6 +683,16 @@ class Corpus:
         # мораг-конфига — значит не индексируем» читается как забывчивость, а цена ошибки здесь
         # — голоса коллег в базе. Веха поиска обязана это поле читать.
         self.indexable: bool = bool(raw.get("indexable", True))
+        # Моменты экрана в читалке (владелец, 04.10): `strip` — лента кадров под видео (как было),
+        # `timeline` — метки на полосе плеера, кадр и текст — карточкой при наведении (только там,
+        # где есть наведение мышью). `frames_text` — отдавать ли в браузер ТЕКСТ экрана: у
+        # демо-окон в нём чужие фамилии и почты, поэтому по умолчанию нет; корпусу, у которого на
+        # экране только свои слайды, это решение принимать самому.
+        reader = raw.get("reader") or {}
+        self.reader: dict = {
+            "frames": "timeline" if reader.get("frames") == "timeline" else "strip",
+            "frames_text": bool(reader.get("frames_text", False)),
+        }
         # Адрес медиа: сначала своё (у пространства бывает свой архив), потом общий из
         # app/config.yml. В `site.yml` его обычно нет — это инфраструктура, а файл в git.
         self.media_base: str = str(content.get("media_base") or media_base or "")
@@ -833,6 +843,7 @@ class Corpus:
             # Кнопки-пресеты вопросов к записи: {ветка: [{label, question}]}, ключ «*» — общие.
             # Тексты доменные, поэтому живут в конфиге корпуса, а не в коде фронта.
             "ask_presets": _presets_public((self.chat or {}).get("presets")),
+            "reader": dict(self.reader),
         }
 
 

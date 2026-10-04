@@ -215,3 +215,19 @@ def test_slides_md_lines_parse_as_transcript_turns(tmp_path):
     assert len(turns) == 3 and all(pat.match(t) for t in turns)
     times = [float(re.search(r"t:([\d.]+)", t).group(1)) for t in turns]
     assert times == sorted(times) == [10.0, 12.5, 100.0]
+
+
+def test_full_frame_keeps_whole_picture_when_speaker_moves_most():
+    """Лектор у слайда на белом фоне: крупнее всего меняется сам лектор (справа), и рамка «где
+    менялось много» садилась на него — кадры экрана выходили портретами (04.10). `full_frame=1` —
+    рамка на весь кадр; движущегося лектора исключает маска частых изменений."""
+    rng = np.random.default_rng(0)
+    n, h, w = 240, 36, 64
+    frames = np.full((n, h, w), 230, np.uint8)
+    for i in range(n):
+        frames[i, :, 44:] = rng.integers(0, 255, (h, w - 44))   # «лектор» шевелится всегда справа
+        frames[i, 5:25, 4:30] = 20 if (i // 60) % 2 else 200      # текст слайда слева сменяется
+    auto = sv.layout_mask(frames, sv.Params())[1]
+    assert auto[0] >= 40, f"без флага рамка садится на лектора: {auto}"
+    whole = sv.layout_mask(frames, sv.Params(full_frame=1))[1]
+    assert whole == (0, 0, w, h)

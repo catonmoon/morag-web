@@ -36,6 +36,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import faststart  # noqa: E402
 import spaces  # noqa: E402
 import turn_edits  # noqa: E402
 
@@ -878,6 +879,13 @@ def build_one(args, source: Path, changed_out: list | None = None) -> int:
                 elif not args.dry:
                     dst.parent.mkdir(parents=True, exist_ok=True)
                     shutil.move(str(src), str(dst))
+                    # Индекс mp4 в конце файла (так пишут монтажки) — Safari/iOS не стартуют.
+                    # Перепаковка без перекодирования; нет ffmpeg — громко, но запись собираем.
+                    try:
+                        if faststart.faststart(dst):
+                            print(f"    видео перепаковано: индекс (moov) перенесён в начало — для Safari/iOS")
+                    except Exception as e:  # noqa: BLE001 - видео важно, но не важнее записи
+                        print(f"  ⚠️ видео не перепаковано ({e}) — Safari/iOS могут его не запустить")
                 meta["media"] = dst.name
                 break
     # ⚠️ Молчим, если видео отключено ФЛАГОМ: зовущий знает, что делает (черновая сборка для

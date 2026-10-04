@@ -75,6 +75,10 @@ class Params:
     same_share: float = 0.03 # нормализованные ключевые кадры отличаются меньше → тот же слайд
     active_every: int = 60   # выборка кадров из активных участков, секунд
     frame_width: int = 1280  # ширина jpeg для модели
+    # 1 — рамка содержимого = весь кадр. Для съёмки «лектор у слайда на белом фоне» (04.10):
+    # крупнее всего там меняется сам лектор, и рамка «где менялось много» садилась на его торс —
+    # кадры экрана выходили портретами. Маска частых изменений лектора и так исключает.
+    full_frame: int = 0
 
 
 # --- кадры ----------------------------------------------------------------------------------
@@ -214,7 +218,7 @@ def layout_mask(frames: np.ndarray, p: Params) -> tuple[np.ndarray, tuple[int, i
     fmask = freq > max(p.freq_min, p.freq_k * float(np.median(freq)))
     big = (d > p.delta).reshape(n - 1, -1).mean(axis=1) > p.big
     x0, x1, y0, y1 = 0, w, 0, h
-    if big.sum() >= 3:
+    if big.sum() >= 3 and not p.full_frame:
         union = (d[big] > p.delta).mean(axis=0) > p.bbox_density
         cols = np.where(union.mean(axis=0) > p.bbox_density)[0]
         rows = np.where(union.mean(axis=1) > p.bbox_density)[0]

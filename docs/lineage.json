@@ -241,6 +241,9 @@
     "tests/js/letter-cloud.test.mjs": {
       "status": "ours"
     },
+    "tests/js/marks.test.mjs": {
+      "status": "ours"
+    },
     "tests/js/md.test.mjs": {
       "status": "verbatim",
       "sha256": "d8f720a7c75ac0df61c46f80d4663faa3220a8f88c4c7442efce182feec93c46"
@@ -301,6 +304,9 @@
     "tests/test_auto_meta.py": {
       "status": "ours"
     },
+    "tests/test_blurb_style.py": {
+      "status": "ours"
+    },
     "tests/test_brand.py": {
       "status": "edited",
       "sha256": "689ff4323c777f31c2144f28f84e73dc3a9e9138f397e3e36cc5494fc0662202"
@@ -333,6 +339,9 @@
     "tests/test_engine.py": {
       "status": "edited",
       "sha256": "fd2489d1752a9f3108b4f03cc7b3dcb4940a4c9c3be4cf7110686c69a10bfdcd"
+    },
+    "tests/test_faststart.py": {
+      "status": "ours"
     },
     "tests/test_favicon.py": {
       "status": "ours"
@@ -599,6 +608,9 @@
       "status": "edited",
       "sha256": "8ed4e6d0865274960c49a2db12b9ce9b2eeaa82315ea4cb76544ca89e036bd7b",
       "from": "web/js/episodes/list.js"
+    },
+    "web/js/records/marks.js": {
+      "status": "ours"
     },
     "web/js/records/reader.js": {
       "status": "edited",

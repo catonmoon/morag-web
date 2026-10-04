@@ -148,6 +148,8 @@ const router = createRouter(
         presets: site?.chat_enabled === false ? null : site?.ask_presets || {},
         onAskCorpus: startChat,
         onOpenRecord: (recordId, at) => router.go({ view: "reader", id: recordId, sec: at }),
+        // Моменты экрана: лента под видео или метки на полосе плеера (site.yml `reader.frames`).
+        frames: site?.reader?.frames || "strip",
       }).catch(fail),
   },
   { getSlug: () => site?.slug || null }

@@ -34,8 +34,8 @@ REPO = Path(__file__).resolve().parent.parent
 VERSION = "blurb-v1"
 HEAD_WORDS = 1800   # начала доклада хватает: тема, повод и план звучат в первые минуты
 
-PROMPT = """Ниже — заголовок и начало расшифровки записи внутренней встречи или лекции компании.
-Напиши краткое содержание для карточки записи на сайте: 2-3 предложения, 40-70 слов, по-русски.
+PROMPT = """Ниже — заголовок и начало расшифровки {material}.
+Напиши краткое содержание для карточки записи на сайте: {sentences} {sent_word}, {words} слов, по-русски.
 
 Требования:
 - О ЧЁМ запись по существу: какую систему, технологию или задачу разбирают и что именно про неё
@@ -43,7 +43,8 @@ PROMPT = """Ниже — заголовок и начало расшифровк
 - Не называй имён и фамилий, не пиши «подкаст», «выпуск», «гости», «спикер».
 - Названия систем и технологий — как они звучат в заголовке или расшифровке, без перевода.
 - Не выдумывай того, чего нет в тексте; если начало не раскрывает существа, опиши тему по заголовку.
-- Обычный текст: без разметки, списков, кавычек-обёрток и вступлений вроде «В этой записи».
+- Обычный текст: без разметки, списков, кавычек-обёрток и вступлений вроде «В этой записи»,
+  «В лекции разбираются», «Лекция посвящена» — сразу существо.
 
 Выведи ТОЛЬКО текст содержания.
 
@@ -53,6 +54,33 @@ PROMPT = """Ниже — заголовок и начало расшифровк
 Начало расшифровки:
 {text}
 """
+
+
+# Длина и вид материала — `content.blurb` в site.yml пространства (владелец, 04.10: «на главном
+# экране — короткие и ёмкие», 1 предложение до 20 слов). Умолчания — прежние 2-3 предложения:
+# корпус, который ничего не задал, получает ровно то, что получал.
+STYLE = {"sentences": "2-3", "words": "40-70",
+         "material": "записи внутренней встречи или лекции компании", "max_tokens": 400}
+
+
+def style_for(rec: Path) -> dict:
+    """`content.blurb` из ближайшего вверх `site.yml` поверх умолчаний."""
+    import yaml  # noqa: PLC0415
+    for d in [rec, *rec.parents]:
+        site = d / "site.yml"
+        if site.is_file():
+            raw = (yaml.safe_load(site.read_text(encoding="utf-8")) or {}).get("content") or {}
+            own = raw.get("blurb") or {}
+            return {**STYLE, **{k: own[k] for k in STYLE if k in own}}
+    return dict(STYLE)
+
+
+def sentence_word(n) -> str:
+    """«1 предложение», «2-3 предложения», «5 предложений» — по последнему числу."""
+    last = int(re.findall(r"\d+", str(n))[-1]) if re.findall(r"\d+", str(n)) else 2
+    if last % 10 == 1 and last % 100 != 11:
+        return "предложение"
+    return "предложения" if last % 10 in (2, 3, 4) and last % 100 not in (12, 13, 14) else "предложений"
 
 
 def prompt_id(text: str) -> str:
@@ -85,12 +113,14 @@ def candidates(root: Path, redo: bool = False) -> list[Path]:
     return out
 
 
-def build_prompt(rec: Path) -> str:
+def build_prompt(rec: Path, style: dict | None = None) -> str:
     md = (rec / "record.md").read_text(encoding="utf-8")
     head = read_header(rec / "record.md")
     cat = head.get("category", "").strip().strip('"')
+    st = style or style_for(rec)
     return PROMPT.format(title=head.get("title", "").strip().strip('"'), branch=head.get("branch", "").strip().strip('"'),
-                         category=f" · {cat}" if cat else "", text=speech_head(md))
+                         category=f" · {cat}" if cat else "", text=speech_head(md), material=st["material"],
+                         sentences=st["sentences"], sent_word=sentence_word(st["sentences"]), words=st["words"])
 
 
 WRAPPER = re.compile(r"^(о чём (эта )?запись|краткое содержание( записи)?|содержание записи|запись о том)\s*[:—–-]\s*", re.I)
@@ -105,16 +135,18 @@ def clean(text: str) -> str:
 
 
 async def one(client, env, rec: Path, sem, log) -> bool:
-    prompt = build_prompt(rec)
+    style = style_for(rec)
+    prompt = build_prompt(rec, style)
     async with sem:
-        content, meta = await chat(client, env, text_model(), prompt, max_tokens=400, temperature=0.2)
+        content, meta = await chat(client, env, text_model(), prompt, max_tokens=int(style["max_tokens"]),
+                                   temperature=0.2)
     text = clean(content or "")
     if not text or meta.get("error"):
         log(f"  ✗ {rec.name[:52]:52s} {meta.get('error') or 'пусто'}")
         return False
     meta_path = rec / "record.meta.json"
     data = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
-    data["blurb"] = {"text": text, "version": VERSION, "model": text_model(), "prompt": prompt_id(PROMPT),
+    data["blurb"] = {"text": text, "version": VERSION, "model": text_model(), "prompt": prompt_id(prompt.split("Заголовок:")[0]),
                      "at": _dt.datetime.now().isoformat(timespec="seconds"), "tokens_in": meta.get("tokens_in"),
                      "tokens_out": meta.get("tokens_out")}
     meta_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

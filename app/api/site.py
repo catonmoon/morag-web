@@ -282,6 +282,15 @@ async def record_frame(request: Request, record_id: str, name: str, slug: str | 
     return FileResponse(path, media_type="image/jpeg", headers=cache)
 
 
+def _screen_text(text, limit: int = 280) -> str:
+    """Текст экрана для карточки момента: строки в одну, по границе слова, с многоточием."""
+    flat = " · ".join(ln.strip() for ln in str(text or "").splitlines() if ln.strip())
+    if len(flat) <= limit:
+        return flat
+    cut = flat[:limit].rsplit(" ", 1)[0]
+    return cut.rstrip(" ·,;:") + "…"
+
+
 @router.get("/records/{record_id}/frames")
 async def record_frames(request: Request, record_id: str, slug: str | None = None):
     """Кадры экрана записи для слайдшоу на карточке (владелец, 14.09) и ленты кадров под видео
@@ -308,9 +317,13 @@ async def record_frames(request: Request, record_id: str, slug: str | None = Non
         if corpus.index.file_of(meta, frame) is not None:
             desc = s.get("desc") or {}
             # род экрана — подписи ленты кадров под видео («окно программы» вместо пустого
-            # заголовка); текст экрана сюда НЕ идёт: у демо-окон в нём чужие фамилии и почты
-            frames.append({"frame": frame, "t0": s.get("t0"), "t1": s.get("t1"),
-                           "kind": str(desc.get("kind") or "")[:20], "title": (desc.get("title") or "")[:80]})
+            # заголовка); текст экрана — ТОЛЬКО если пространство разрешило (`reader.frames_text`):
+            # у демо-окон в нём чужие фамилии и почты, а слайды лекции публичны и так
+            item = {"frame": frame, "t0": s.get("t0"), "t1": s.get("t1"),
+                    "kind": str(desc.get("kind") or "")[:20], "title": (desc.get("title") or "")[:80]}
+            if corpus.reader.get("frames_text"):
+                item["text"] = _screen_text(desc.get("text"))
+            frames.append(item)
     box = ((data.get("cover") or {}).get("crop") or {}).get("box")
     return {"frames": frames, "crop": box if isinstance(box, list) and len(box) == 4 else None}
 

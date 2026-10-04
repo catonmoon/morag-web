@@ -85,6 +85,36 @@ def test_кадры_записи_для_слайдшоу_без_людей_и_с
         (rec / "record.slides.json").unlink(missing_ok=True)
 
 
+def test_текст_экрана_отдаётся_только_по_разрешению_пространства(client):
+    """Карточка момента на полосе плеера показывает текст экрана, но только у пространства с
+    `reader.frames_text: true` (свои слайды); по умолчанию текста нет — у демо-окон там чужие
+    фамилии и почты. Режим и разрешение уезжают в браузер вместе с конфигом сайта."""
+    import json
+    import shutil
+    rec = REPO / "corpora" / "demo" / "records" / RECORD
+    corpus = client.app.state.corpora[SLUG]
+    assert corpus.public()["reader"] == {"frames": "strip", "frames_text": False}
+    frames = rec / "slides"
+    frames.mkdir(exist_ok=True)
+    saved = dict(corpus.reader)
+    try:
+        (frames / "s001.jpg").write_bytes(b"\xff\xd8\xff")
+        long_text = "Kafka\nPostgres " + "очередь " * 80
+        (rec / "record.slides.json").write_text(json.dumps({"slides": [
+            {"n": 1, "t0": 5.0, "t1": 50.0, "frame": "slides/s001.jpg", "desc": {"title": "Титул", "text": long_text}},
+        ]}), encoding="utf-8")
+        out = client.get(f"/api/records/{RECORD}/frames?slug={SLUG}").json()
+        assert "text" not in out["frames"][0]
+        corpus.reader = {"frames": "timeline", "frames_text": True}
+        text = client.get(f"/api/records/{RECORD}/frames?slug={SLUG}").json()["frames"][0]["text"]
+        assert text.startswith("Kafka · Postgres") and text.endswith("…") and len(text) <= 281
+        assert corpus.public()["reader"]["frames"] == "timeline"
+    finally:
+        corpus.reader = saved
+        shutil.rmtree(frames, ignore_errors=True)
+        (rec / "record.slides.json").unlink(missing_ok=True)
+
+
 def test_главная_отдаётся(client):
     response = client.get("/")
     assert response.status_code == 200
