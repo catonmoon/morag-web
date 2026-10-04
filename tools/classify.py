@@ -17,7 +17,7 @@
 ⚠️ Классификатор — у нас, не в движке: сайт читает шапки с диска, правка владельца живёт в мете
 (`labels`), а вход лежит в наших сайдкарах. Движку достаточно увидеть поля в шапке.
 ⚠️ Интерпретатор — venv морага: нужен его LLM-клиент (`openai`); адрес и ключ шлюза — из
-файл стека (`ASR_LLM_BASE_URL`, `ASR_LLM_MODEL`, `OR_KEY`), температура 0 и seed —
+файл стека (`ASR_LLM_BASE_URL`, `ASR_TEXT_MODEL` или `ASR_LLM_MODEL`, `OR_KEY`), температура 0 и seed —
 детерминизм, чтобы пересборка не переставляла категории сама по себе.
 """
 
@@ -271,21 +271,19 @@ def prompt_for(inp: dict, tax: dict, index: dict) -> str:
 
 def load_env() -> dict:
     """Адрес, модель и ключ шлюза из файла стека транскрибации (`describe_slides.stack_env_file`:
-    `$ASR_STACK_ENV` → `ops.env` корпуса → `~/.asr-stack.env`). Прокси из оболочки снимаем."""
-    from describe_slides import stack_env_file  # noqa: PLC0415
-    for var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
-        os.environ.pop(var, None)
+    `$ASR_STACK_ENV` → `ops.env` корпуса → `~/.asr-stack.env`). Прокси оболочки снимаем, прокси
+    из файла стека — ставим (`describe_slides.apply_stack_proxy`).
+
+    Модель — `ASR_TEXT_MODEL`, иначе `ASR_LLM_MODEL`: разметка — текстовая работа, и корпус, у
+    которого стадии расшифровки идут на одной модели, а текст на другой, задаёт текстовую отдельно.
+    """
+    from describe_slides import apply_stack_proxy, stack_env_file, stack_values  # noqa: PLC0415
+    values = stack_values()
+    apply_stack_proxy(values)
     env_file = stack_env_file()
-    values: dict[str, str] = {}
-    if env_file.is_file():
-        for line in env_file.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            values[key.replace("export ", "").strip()] = val.strip().strip('"').strip("'")
     base = os.environ.get("ASR_LLM_BASE_URL") or values.get("ASR_LLM_BASE_URL") or ""
-    model = os.environ.get("ASR_LLM_MODEL") or values.get("ASR_LLM_MODEL") or ""
+    model = (os.environ.get("ASR_TEXT_MODEL") or values.get("ASR_TEXT_MODEL")
+             or os.environ.get("ASR_LLM_MODEL") or values.get("ASR_LLM_MODEL") or "")
     key = os.environ.get("OR_KEY") or values.get("OR_KEY") or ""
     if not (base and model and key):
         sys.exit(f"нет адреса/модели/ключа LLM: ASR_LLM_BASE_URL, ASR_LLM_MODEL, OR_KEY в {env_file}")

@@ -66,7 +66,11 @@ audience — зал, слушатели; gallery — плитка окон уч�
 WHO = {"speaker", "audience", "gallery", "mixed"}
 SETTING = {"stage", "webcam", "other"}
 
+# Имена моделей по умолчанию — алиасы шлюза, под который инструменты писались. Шлюз без таких
+# алиасов (OpenRouter и любой публичный) называет модели своими именами: их задают в файле стека
+# `ASR_VISION_MODEL` / `ASR_TEXT_MODEL` (см. `vision_model()` / `text_model()`).
 MODEL = "Vision"
+MODEL_TEXT = "Instruct"
 CONCURRENCY = 3
 # ⚠️ Thinking выключаем ЯВНО, тремя способами сразу (как клиент морага — каждый провайдер
 # читает свой). Замерено 12.09: без этого Qwen на свободный вопрос «что он имеет в виду»
@@ -96,24 +100,11 @@ def progress(**fields) -> None:
     print("@progress " + json.dumps(fields, ensure_ascii=False), flush=True)
 
 
-def load_env() -> dict:
-    """Адрес и ключ шлюза из файла стека; прокси оболочки снимаем — контуру он не нужен, а
-    питон через него падает на сертификате.
+PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
 
-    ⚠️⚠️ Здесь же включаем доверие СВЯЗКЕ КЛЮЧЕЙ МАШИНЫ (`truststore`). Сайт и шлюз подписаны
-    внутренним центром сертификации, а httpx верит только `certifi` — без этого ВСЕ кадры падают
-    с `CERTIFICATE_VERIFY_FAILED` (ловилось живьём 24.09). В `upload.py` такая же инъекция есть, но она
-    живёт В СВОЁМ ПРОЦЕССЕ и в подпроцессы не наследуется; `SSL_CERT_FILE` тоже не спасает — его
-    экспортирует только враппер установщика, а из чекаута его нет вовсе. `screen_refs.py` берёт
-    эту же функцию — чинится разом.
-    """
-    for var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
-        os.environ.pop(var, None)
-    try:
-        import truststore   # noqa: PLC0415 - нужен только здесь и только один раз
-        truststore.inject_into_ssl()
-    except Exception:       # noqa: BLE001 - нет пакета — работаем как раньше, через certifi
-        pass
+
+def stack_values() -> dict[str, str]:
+    """Пары `КЛЮЧ=значение` файла стека (без подстановок `$VAR`: здесь они не нужны)."""
     env_file = stack_env_file()
     values: dict[str, str] = {}
     if env_file.is_file():
@@ -123,6 +114,60 @@ def load_env() -> dict:
                 continue
             key, _, val = line.partition("=")
             values[key.replace("export ", "").strip()] = val.strip().strip('"').strip("'")
+    return values
+
+
+def stack_setting(name: str, default: str = "") -> str:
+    """Настройка инструмента: окружение процесса → файл стека → умолчание. Переменная процесса — первой:
+    окно загрузки передаёт подпроцессам адрес и модель именно так."""
+    return os.environ.get(name) or stack_values().get(name) or default
+
+
+def vision_model() -> str:
+    """Модель для кадров: `ASR_VISION_MODEL`, иначе алиас шлюза `Vision`."""
+    return stack_setting("ASR_VISION_MODEL", MODEL)
+
+
+def text_model() -> str:
+    """Модель для текстовых шагов экрана и аннотации: `ASR_TEXT_MODEL`, иначе алиас `Instruct`.
+    Отдельно от `ASR_LLM_MODEL`: стадиям расшифровки и разбору текста корпус может хотеть разные
+    модели (дешёвая с картинками на стадии, другая — на текст)."""
+    return stack_setting("ASR_TEXT_MODEL", MODEL_TEXT)
+
+
+def apply_stack_proxy(values: dict[str, str]) -> None:
+    """Прокси оболочки снимаем всегда; прокси, ОБЪЯВЛЕННЫЙ в файле стека, ставим обратно.
+
+    Прокси — свойство контура, а не оболочки: корпоративному шлюзу он вреден (питон падает на
+    сертификате), а до публичного шлюза из иных сетей без него не достучаться — замерено: прямой
+    запрос отвечает 403. Файл стека и так описывает контур (адрес, ключ), поэтому решает он.
+    """
+    for var in PROXY_VARS:
+        os.environ.pop(var, None)
+    for var in PROXY_VARS:
+        if values.get(var):
+            os.environ[var] = values[var]
+
+
+def load_env() -> dict:
+    """Адрес и ключ шлюза из файла стека; прокси оболочки снимаем — контуру он не нужен, а
+    питон через него падает на сертификате. Прокси из файла стека — ставим (`apply_stack_proxy`).
+
+    ⚠️⚠️ Здесь же включаем доверие СВЯЗКЕ КЛЮЧЕЙ МАШИНЫ (`truststore`). Сайт и шлюз подписаны
+    внутренним центром сертификации, а httpx верит только `certifi` — без этого ВСЕ кадры падают
+    с `CERTIFICATE_VERIFY_FAILED` (ловилось живьём 24.09). В `upload.py` такая же инъекция есть, но она
+    живёт В СВОЁМ ПРОЦЕССЕ и в подпроцессы не наследуется; `SSL_CERT_FILE` тоже не спасает — его
+    экспортирует только враппер установщика, а из чекаута его нет вовсе. `screen_refs.py` берёт
+    эту же функцию — чинится разом.
+    """
+    values = stack_values()
+    apply_stack_proxy(values)
+    try:
+        import truststore   # noqa: PLC0415 - нужен только здесь и только один раз
+        truststore.inject_into_ssl()
+    except Exception:       # noqa: BLE001 - нет пакета — работаем как раньше, через certifi
+        pass
+    env_file = stack_env_file()
     base = os.environ.get("ASR_LLM_BASE_URL") or values.get("ASR_LLM_BASE_URL") or ""
     key = os.environ.get("OR_KEY") or values.get("OR_KEY") or ""
     if not (base and key):
@@ -285,6 +330,7 @@ async def run(record: Path, args) -> int:
     if not path.is_file():
         sys.exit(f"нет {path} — сначала slides_from_video.py")
     data = json.loads(path.read_text(encoding="utf-8"))
+    args.model = args.model or vision_model()
     pid = prompt_id(PROMPT, args.model)
     items = []
     for group in ("slides", "samples"):
@@ -387,7 +433,7 @@ async def run(record: Path, args) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("record", type=Path, help="каталог записи с record.slides.json")
-    ap.add_argument("--model", default=MODEL)
+    ap.add_argument("--model", default=None, help="модель кадров; по умолчанию ASR_VISION_MODEL или «Vision»")
     ap.add_argument("--only", choices=["slides", "samples", "intro"], help="описывать только слайды, только выборку или только заставку")
     ap.add_argument("--min-dur", type=float, default=0, help="слайды короче (с) не описывать")
     ap.add_argument("--limit", type=int, default=0)

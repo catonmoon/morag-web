@@ -178,15 +178,16 @@ def render(rec: Path, source: str, check: dict) -> dict:
 async def check_frame(rec: Path, source: str) -> dict | None:
     """Vision: где полоса участников и подпись говорящего на выбранном кадре."""
     import httpx  # noqa: PLC0415
-    from describe_slides import MODEL, describe, load_env  # noqa: PLC0415
+    from describe_slides import describe, load_env, vision_model  # noqa: PLC0415
     env = load_env()
+    model = vision_model()
     async with httpx.AsyncClient(timeout=120) as client:
-        out, meta = await describe(client, env, rec / source, MODEL, CHECK_PROMPT, asyncio.Semaphore(1))
+        out, meta = await describe(client, env, rec / source, model, CHECK_PROMPT, asyncio.Semaphore(1))
     if not isinstance(out, dict):
         print(f"    ⚠️ Vision: {meta.get('error') or 'нет ответа'}")
         return None
     return {"participants": str(out.get("participants") or "none"), "share": float(out.get("share") or 0),
-            "label": str(out.get("label") or "none"), "model": MODEL,
+            "label": str(out.get("label") or "none"), "model": model,
             "at": _dt.datetime.now().isoformat(timespec="seconds")}
 
 

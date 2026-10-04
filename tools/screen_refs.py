@@ -39,11 +39,11 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from describe_slides import (NO_THINK, PROMPT as PROMPT_DESCRIBE, describe, load_env,  # noqa: E402
-                             normalize_desc, parse_json, prompt_id)
+                             normalize_desc, parse_json, prompt_id, text_model, vision_model)
 
 VERSION = "refs-v1"
-MODEL_TEXT = "Instruct"
-MODEL_VISION = "Vision"
+# Модели — из файла стека (`text_model()` / `vision_model()` в describe_slides): алиасы шлюза
+# `Instruct`/`Vision` по умолчанию, свои имена у публичного шлюза.
 
 # Широкий предфильтр: основы слов, а не формы. Цена ложного кандидата — лишний абзац в окне
 # LLM; цена пропуска — обращение потеряно. Поэтому широкий.
@@ -179,7 +179,7 @@ async def find_refs(client, env, turns: list[dict], sem: asyncio.Semaphore, log,
         out = None
         for attempt in range(2):  # Instruct изредка отвечает не JSON — один повтор
             async with sem:
-                content, meta = await chat(client, env, MODEL_TEXT, PROMPT_REFS + text, max_tokens=1500,
+                content, meta = await chat(client, env, text_model(), PROMPT_REFS + text, max_tokens=1500,
                                            temperature=0.1 + 0.2 * attempt)
             stats["tokens_in"] += meta.get("tokens_in") or 0
             stats["tokens_out"] += meta.get("tokens_out") or 0
@@ -264,7 +264,7 @@ def frame_for(record: Path, r: dict, video: Path | None, slides: dict | None) ->
 async def resolve_refs(client, env, record: Path, refs: list[dict], video: Path | None, slides: dict | None,
                        sem: asyncio.Semaphore, log) -> dict:
     stats = {"asked": 0, "resolved": 0, "no_frame": 0, "unclear": 0, "people": 0, "tokens_in": 0, "tokens_out": 0}
-    pid = prompt_id(PROMPT_RESOLVE, MODEL_VISION)
+    pid = prompt_id(PROMPT_RESOLVE, vision_model())
 
     async def one(r):
         if r.get("resolve_meta", {}).get("prompt") == pid or r.get("people"):
@@ -278,7 +278,7 @@ async def resolve_refs(client, env, record: Path, refs: list[dict], video: Path 
             # ⚠️ Кадр вырезан только что, модель его ещё не видела: сначала «что это»,
             # тем же промптом, что у слайдов. На вопрос «что он имеет в виду» модель
             # описывает и лицо в камере — так кадр с человеком остался на диске (ловилось).
-            out, _ = await describe(client, env, img, MODEL_VISION, PROMPT_DESCRIBE, sem)
+            out, _ = await describe(client, env, img, vision_model(), PROMPT_DESCRIBE, sem)
             kind = normalize_desc(out)["kind"] if out else "other"
             if kind == "people":
                 img.unlink(missing_ok=True)
@@ -292,7 +292,7 @@ async def resolve_refs(client, env, record: Path, refs: list[dict], video: Path 
         content = [{"type": "text", "text": prompt},
                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}]
         async with sem:
-            text, meta = await chat(client, env, MODEL_VISION, content, max_tokens=400)
+            text, meta = await chat(client, env, vision_model(), content, max_tokens=400)
         stats["asked"] += 1
         stats["tokens_in"] += meta.get("tokens_in") or 0
         stats["tokens_out"] += meta.get("tokens_out") or 0
@@ -300,7 +300,7 @@ async def resolve_refs(client, env, record: Path, refs: list[dict], video: Path 
             r["resolve_error"] = meta.get("error") or "пусто"
             return
         text = text.strip().strip("`").strip()
-        r["resolve_meta"] = {"model": MODEL_VISION, "prompt": pid, "sec": meta.get("sec")}
+        r["resolve_meta"] = {"model": vision_model(), "prompt": pid, "sec": meta.get("sec")}
         if re.match(r"^\W*люди", text, re.I):
             # ⚠️ кадр момента — люди: не храним (вырезанный сюда кадр — прочь), не описываем
             r["people"] = True
@@ -352,7 +352,7 @@ async def run(record: Path, a) -> int:
             print("  по родам:", dict(Counter(r["kind"] for r in refs)),
                   "· время по словам:", sum(r["t_exact"] for r in refs), "из", len(refs))
         attach_slides(refs, slides)
-        data = {"version": VERSION, "model": MODEL_TEXT, "prompt": prompt_id(PROMPT_REFS, MODEL_TEXT),
+        data = {"version": VERSION, "model": text_model(), "prompt": prompt_id(PROMPT_REFS, text_model()),
                 "refs": refs, "stats": stats}
         out_path.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
         if a.resolve:

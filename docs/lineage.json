@@ -383,6 +383,9 @@
     "tests/test_screen_tools.py": {
       "status": "ours"
     },
+    "tests/test_stack_env.py": {
+      "status": "ours"
+    },
     "tests/test_turn_edits.py": {
       "status": "ours"
     },

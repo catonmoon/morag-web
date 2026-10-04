@@ -26,9 +26,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from describe_slides import load_env  # noqa: E402
+from describe_slides import load_env, text_model  # noqa: E402
 from make_slides_md import read_header  # noqa: E402
-from screen_refs import MODEL_TEXT, chat  # noqa: E402
+from screen_refs import chat  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 VERSION = "blurb-v1"
@@ -56,7 +56,7 @@ PROMPT = """Ниже — заголовок и начало расшифровк
 
 
 def prompt_id(text: str) -> str:
-    return f"{MODEL_TEXT}:{hashlib.sha1(text.encode('utf-8')).hexdigest()[:12]}"
+    return f"{text_model()}:{hashlib.sha1(text.encode('utf-8')).hexdigest()[:12]}"
 
 
 def speech_head(md: str, words: int = HEAD_WORDS) -> str:
@@ -107,14 +107,14 @@ def clean(text: str) -> str:
 async def one(client, env, rec: Path, sem, log) -> bool:
     prompt = build_prompt(rec)
     async with sem:
-        content, meta = await chat(client, env, MODEL_TEXT, prompt, max_tokens=400, temperature=0.2)
+        content, meta = await chat(client, env, text_model(), prompt, max_tokens=400, temperature=0.2)
     text = clean(content or "")
     if not text or meta.get("error"):
         log(f"  ✗ {rec.name[:52]:52s} {meta.get('error') or 'пусто'}")
         return False
     meta_path = rec / "record.meta.json"
     data = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
-    data["blurb"] = {"text": text, "version": VERSION, "model": MODEL_TEXT, "prompt": prompt_id(PROMPT),
+    data["blurb"] = {"text": text, "version": VERSION, "model": text_model(), "prompt": prompt_id(PROMPT),
                      "at": _dt.datetime.now().isoformat(timespec="seconds"), "tokens_in": meta.get("tokens_in"),
                      "tokens_out": meta.get("tokens_out")}
     meta_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
