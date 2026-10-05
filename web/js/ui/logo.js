@@ -130,8 +130,16 @@ function showSvgMark(brand, markHost, wordHost) {
   const fit = () => {
     const h = (wordHost.closest(".logo-word") || wordHost).getBoundingClientRect().height;
     if (h > 0) {
-      markHost.style.height = `${h.toFixed(2)}px`;
-      markHost.style.width = `${(h * ratio).toFixed(2)}px`;
+      // Целые пиксели: при дробной ширине знака (88.86 px) слово и подпись справа стоят на
+      // дробных x, и смена кадра на наведении (кадры уходят на свой слой) перепривязывает их
+      // к сетке — шапка «дёргалась» на 1–2 px (замер 05.10: прямоугольники те же, сдвиг рендерный).
+      markHost.style.height = `${Math.round(h)}px`;
+      markHost.style.width = `${Math.round(h * ratio)}px`;
+      markHost.style.alignSelf = "flex-start";   // без центровки: она вернула бы y на ½ px
+      if (logo) {
+        logo.style.gap = `${boxfont.spaceCols()}ch`;      // ширина пробела шрифта → в px
+        logo.style.gap = `${Math.round(parseFloat(getComputedStyle(logo).columnGap))}px`;
+      }
     }
     measureTopbar();
   };

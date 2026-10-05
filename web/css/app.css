@@ -769,7 +769,9 @@ body[data-view="chat"] .chat-tools{display:flex}
 /* Векторный знак (`brand.mark` — SVG-кадры): стопка кадров, виден один; смена — прозрачностью.
    Размер ставит logo.js по высоте слова с подписью. Линии — currentColor, как у букв. */
 .logo-mark.logo-svg{position:relative;flex:none;font-size:inherit}
-.logo-svg .logo-frame{position:absolute;inset:0;opacity:0;transition:opacity .45s ease}
+.logo-svg .logo-frame{position:absolute;inset:0;opacity:0;transition:opacity .45s ease;will-change:opacity}
+/* will-change — слой у кадров с самого начала: иначе он появляется на первой смене кадра и
+   растр знака сдвигается на субпиксель (видно как «лого дёрнулось при наведении»). */
 .logo-svg .logo-frame.on{opacity:1}
 .logo-svg svg{display:block;width:100%;height:100%;overflow:visible}
 @media (prefers-reduced-motion:reduce){.logo-svg .logo-frame{transition:none}}
