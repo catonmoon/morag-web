@@ -27,6 +27,11 @@ export function showMark(brand = {}) {
   const markHost = $("#logo-mark"), wordHost = $("#logo-word");
   if (!markHost || !wordHost) return null;
   stopIdle();
+  // Векторный знак (`brand.mark` — SVG-файлы): тонкие сглаженные линии и полутона вместо клеток.
+  if (Array.isArray(brand.mark?.svg) && brand.mark.svg.length) return showSvgMark(brand, markHost, wordHost);
+  markHost.classList.remove("logo-svg");
+  markHost.style.width = markHost.style.height = "";
+  svgShown = null;
   const art = brand.mark && Array.isArray(brand.mark.lines) ? brand.mark : null;
   const lines = boxfont.render(brand.wordmark || DEFAULT_WORDMARK, { weight: brand.wordmark_weight });
   // `size: word` — маленький рисунок в несколько строк рядом со словом: в поле знака клетки
@@ -71,6 +76,62 @@ export function showMark(brand = {}) {
   return acts;
 }
 
+// Векторный знак: кадры стопкой, виден один (`.on`); по наведению — следующий, сменой прозрачности.
+let svgShown = null;   // {host, index, count}
+
+/**
+ * Знак из SVG-кадров рядом со словом. Разметка пришла с сервера уже проверенной (`_mark_svg`:
+ * корень svg, без скриптов, обработчиков и ссылок). Высота — по блоку слова с подписью (как у
+ * `mark_size: word`), ширина — по пропорции viewBox первого кадра; зазор — пробел рамочного шрифта.
+ */
+function showSvgMark(brand, markHost, wordHost) {
+  const lines = boxfont.render(brand.wordmark || DEFAULT_WORDMARK, { weight: brand.wordmark_weight });
+  const { field, ox, oy, sx, sy } = layout(null, lines, 1);
+  markHost.textContent = "";
+  markHost.className = "logo-mark logo-svg";
+  markHost.hidden = false;
+  brand.mark.svg.forEach((svg, k) => {
+    const frame = document.createElement("span");
+    frame.className = k ? "logo-frame" : "logo-frame on";
+    frame.innerHTML = svg;
+    markHost.append(frame);
+  });
+  svgShown = brand.mark.svg.length > 1 ? { host: markHost, index: 0, count: brand.mark.svg.length } : null;
+  shown = null;
+  acts = { blink() {}, sniff() {}, live: false };
+  renderText(wordHost, lines, field, { ox, oy, sx, sy });
+  const sub = $(".logo-word em");
+  if (sub) sub.textContent = brand.wordmark ? "morag" : "web";
+  const logo = $(".logo");
+  if (logo) {
+    logo.style.gap = `${boxfont.spaceCols()}ch`;
+    logo.classList.remove("no-art");
+  }
+  const first = markHost.querySelector("svg");
+  const vb = first?.viewBox?.baseVal;
+  const ratio = vb && vb.height ? vb.width / vb.height : 2;
+  const fit = () => {
+    const h = (wordHost.closest(".logo-word") || wordHost).getBoundingClientRect().height;
+    if (h > 0) {
+      markHost.style.height = `${h.toFixed(2)}px`;
+      markHost.style.width = `${(h * ratio).toFixed(2)}px`;
+    }
+    measureTopbar();
+  };
+  fit();
+  document.fonts?.ready.then(fit).catch(() => {});
+  return acts;
+}
+
+/** Следующий SVG-кадр: плавная смена прозрачности (CSS); «уменьшить движение» — без перехода. */
+function nextSvgFrame() {
+  if (!svgShown) return;
+  const frames = svgShown.host.querySelectorAll(".logo-frame");
+  frames[svgShown.index]?.classList.remove("on");
+  svgShown.index = (svgShown.index + 1) % svgShown.count;
+  frames[svgShown.index]?.classList.add("on");
+}
+
 /**
  * Следующий кадр знака — по наведению (владелец, 05.10: «только при наведении»): клетки
  * пересыпаются за ~0.3 с; при «уменьшить движение» — сразу. Пока идёт пересыпание, новое
@@ -107,6 +168,7 @@ export function initLogo() {
     // Наведение — повод нюхнуть: жест по действию человека, а не по таймеру.
     acts?.sniff();
     nextFrame();
+    nextSvgFrame();
     if (haloLive() && !reducedMotion()) {
       run?.stop();
       // Светлая тема — без теней (владелец, 16.09): на белой шапке свечение читается как

@@ -186,3 +186,18 @@ def test_знак_из_нескольких_кадров_в_одной_сетк�
     assert out["frames"] == [[" ab", " cd", " ef"], ["   ", "xyz", "   "]]
     assert out["lines"] == out["frames"][0]
     assert "frames" not in mark_payload({"mark": ["a.txt"]}, find)
+
+
+def test_векторный_знак_svg_и_отказ_опасной_разметке(tmp_path):
+    """`mark` SVG-файлами — векторный знак (тонкие линии, полутона); разметка уходит в страницу,
+    поэтому скрипты, обработчики, ссылки и вставки — отказ целиком, а не «почистить»."""
+    good = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 4"><line x1="0" y1="0" x2="8" y2="4"/></svg>'
+    (tmp_path / "a.svg").write_text('<?xml version="1.0"?>\n' + good, encoding="utf-8")
+    find = lambda name: tmp_path / name if (tmp_path / name).exists() else None  # noqa: E731
+    out = mark_payload({"mark": ["a.svg"], "mark_size": "word"}, find)
+    assert out == {"svg": [good], "size": "word"}
+    for i, bad in enumerate(['<svg onload="x()"></svg>', '<svg><script>x()</script></svg>',
+                             '<svg><a href="https://example.org"><line/></a></svg>', '<svg><image/></svg>',
+                             '<div></div>', '<svg>' + " " * 40000 + '</svg>']):
+        (tmp_path / f"b{i}.svg").write_text(bad, encoding="utf-8")
+        assert mark_payload({"mark": [f"b{i}.svg"]}, find) is None, bad[:30]

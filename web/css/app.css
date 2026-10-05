@@ -766,6 +766,13 @@ body[data-view="chat"] .chat-tools{display:flex}
 /* Маленький знак в несколько строк (`brand.mark_size: word`) — по высоте слова с подписью; кегль
    ставит logo.js по фактической высоте блока слова (здесь — запасной, до замера). */
 .logo-mark.word-size{font-size:inherit}
+/* Векторный знак (`brand.mark` — SVG-кадры): стопка кадров, виден один; смена — прозрачностью.
+   Размер ставит logo.js по высоте слова с подписью. Линии — currentColor, как у букв. */
+.logo-mark.logo-svg{position:relative;flex:none;font-size:inherit}
+.logo-svg .logo-frame{position:absolute;inset:0;opacity:0;transition:opacity .45s ease}
+.logo-svg .logo-frame.on{opacity:1}
+.logo-svg svg{display:block;width:100%;height:100%;overflow:visible}
+@media (prefers-reduced-motion:reduce){.logo-svg .logo-frame{transition:none}}
 /* Без рисунка (бренд корпуса его не дал) — только слово, зазор не нужен. */
 .logo-mark[hidden]{display:none} .logo.no-art{gap:0}
 /* Кончик морды вынесен в свой узел, чтобы двигать ЕГО, а не строку целиком.

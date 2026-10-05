@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 import os
 import sys
 from pathlib import Path
@@ -610,6 +611,25 @@ def _mark_lines(name: str, find_file) -> list[str] | None:
     return lines
 
 
+MARK_SVG_MAX = 32 * 1024
+_SVG_BAD = re.compile(r"<\s*(script|foreignObject|iframe|image|use)\b|\son\w+\s*=|javascript:|xlink:href|\shref\s*=",
+                      re.IGNORECASE)
+
+
+def _mark_svg(name: str, find_file) -> str | None:
+    """SVG-кадр знака: файл бренда корпуса, но уходит в страницу как разметка — поэтому строго:
+    корень `<svg>`, до 32 КБ, без скриптов, обработчиков, ссылок и вставок (файл пишет владелец
+    корпуса, но сайт открыт всем — лишнее не пропускаем, а отказываем целиком)."""
+    path = find_file(name)
+    if path is None:
+        return None
+    text = path.read_text(encoding="utf-8").strip()
+    text = re.sub(r"^<\?xml[^>]*\?>\s*", "", text)
+    if len(text) > MARK_SVG_MAX or not text.startswith("<svg") or not text.endswith("</svg>") or _SVG_BAD.search(text):
+        return None
+    return text
+
+
 def _pad_frame(lines: list[str], rows: int, cols: int) -> list[str]:
     """Кадр — в общую сетку: по вертикали по центру, по горизонтали ЦЕЛЫМ БЛОКОМ к правому краю —
     к слову: зазор знак↔слово (пробел рамочного шрифта) одинаков у всех кадров, а узкий кадр,
@@ -633,7 +653,18 @@ def mark_payload(brand: dict, find_file) -> dict | None:
     # Список файлов — знак из нескольких кадров: при наведении он перетекает в следующий
     # (владелец, 05.10: «чтобы они менялись»). Кадры выравниваются в одну сетку — шапка не прыгает.
     names = [names] if isinstance(names, str) else names if isinstance(names, list) else []
-    frames = [f for f in (_mark_lines(n, find_file) for n in names if isinstance(n, str) and n) if f]
+    names = [n for n in names if isinstance(n, str) and n]
+    # Векторный знак (владелец, 05.10: ASCII «слишком рвано и пиксельно, не видно полутонов»):
+    # SVG-файлы — тонкие сглаженные линии и полутона прозрачностью. Все кадры — SVG, иначе ASCII.
+    if names and all(n.lower().endswith(".svg") for n in names):
+        svgs = [v for v in (_mark_svg(n, find_file) for n in names) if v]
+        if not svgs:
+            return None
+        out_svg: dict = {"svg": svgs}
+        if brand.get("mark_size") == "word":
+            out_svg["size"] = "word"
+        return out_svg
+    frames = [f for f in (_mark_lines(n, find_file) for n in names) if f]
     if not frames:
         return None
     rows = max(len(f) for f in frames)
