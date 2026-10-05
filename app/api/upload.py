@@ -71,7 +71,7 @@ async def options(request: Request) -> dict:
            "path": "/api/upload/llm",
            "model": gateway.get("ASR_LLM_MODEL", "") if gateway else "",
            "cookie": app_cfg.auth.cookie_name if app_cfg.auth.enabled else ""}
-    return {"events": core.events_of(staging.family), "video_ext": list(core.VIDEO_EXT),
+    return {"events": core.events_of(staging.family, for_upload=True), "video_ext": list(core.VIDEO_EXT),
             "max_gb": cfg.max_gb, "files": list(core.FILES), "llm": llm,
             "tags": _tags(request)}
 

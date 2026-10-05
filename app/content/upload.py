@@ -88,16 +88,34 @@ def record_id(date: str, title: str) -> str:
     return f"{date}-{slugify(title)}"[:130].rstrip("-")
 
 
-def events_of(family: Path) -> list[str]:
+def events_of(family: Path, *, for_upload: bool = False) -> list[str]:
     """Рубрики, которые правила раскладки (`hub.yml::routing`) умеют положить на место: значения
-    `event` и `event_prefix` правил с веткой. Пусто — раскладки нет, рубрика свободная."""
+    `event` и `event_prefix` правил с веткой. Пусто — раскладки нет, рубрика свободная.
+
+    `for_upload` — только то, что можно выбрать при ЗАГРУЗКЕ: правило с `upload: false` ставится
+    лишь принудительно (правкой записи на сайте или руками), в список приложения не идёт. Иначе
+    подбор полей приложения выбирал из всех веток подряд, и доклад уезжал в курс или в чужое
+    мероприятие."""
     out: list[str] = []
     for rule in (spaces._hub(family).get("routing") or []):
+        if for_upload and rule.get("upload") is False:
+            continue
         match = rule.get("match") or {}
         value = match.get("event") or match.get("event_prefix")
         if value and rule.get("branch") and value not in out:
             out.append(str(value))
     return out
+
+
+def forced_tags(family: Path) -> set[str]:
+    """Метки, по которым раскладывают ТОЛЬКО принудительные правила (`upload: false`).
+
+    ⚠️ Правило с меткой срабатывает раньше рубрики (ключи правила — ИЛИ), поэтому одна такая метка,
+    подобранная приложением из меток корпуса, увозила загрузку в принудительную ветку при любой
+    выбранной рубрике. У загрузки такие метки снимаются."""
+    return {str((rule.get("match") or {}).get("tag"))
+            for rule in (spaces._hub(family).get("routing") or [])
+            if rule.get("upload") is False and (rule.get("match") or {}).get("tag")}
 
 
 def validate(raw: dict, family: Path) -> Manifest:
@@ -109,13 +127,15 @@ def validate(raw: dict, family: Path) -> Manifest:
     if not DATE_RE.match(date):
         raise Refused("дата — в виде YYYY-MM-DD")
     event = str(raw.get("event") or "").strip()
-    allowed = events_of(family)
+    allowed = events_of(family, for_upload=True)
     if allowed and not event:
         raise Refused("не указана рубрика — она решает, в какую ветку и год ляжет запись; "
                       f"выберите одну из: {', '.join(allowed)}")
     if allowed and event not in allowed:
         raise Refused(f"рубрика «{event}» не разложится по веткам; допустимые: {', '.join(allowed)}")
-    tags = [str(t).strip() for t in (raw.get("tags") or []) if str(t).strip()][:20]
+    forced = forced_tags(family)
+    tags = [str(t).strip() for t in (raw.get("tags") or [])
+            if str(t).strip() and str(t).strip() not in forced][:20]
     speakers = [str(t).strip() for t in (raw.get("speakers") or []) if str(t).strip()][:20]
     summary = str(raw.get("summary") or "").strip()[:2000]
     video = str(raw.get("video") or "").strip()

@@ -69,6 +69,24 @@ def test_events_come_from_routing_rules_with_a_branch(tmp_path):
     assert core.validate({"title": "Норм", "date": "2026-03-12", "video": "a.mp4", "event": "Концерт"}, tmp_path).event == "Концерт"
 
 
+def test_forced_rules_are_not_offered_to_uploads(tmp_path):
+    """`upload: false` — ветка только принудительно: ни в списке рубрик загрузки, ни по метке."""
+    (tmp_path / "hub.yml").write_text(yaml.safe_dump({"routing": [
+        {"match": {"tag": "Концерт", "event_prefix": "Концерт"}, "space": "t", "branch": "Встречи",
+         "upload": False},
+        {"match": {"event": "Курс Python"}, "space": "t", "branch": "Курсы", "upload": False},
+        {"match": {"event": "Доклады"}, "space": "t", "branch": "Доклады"},
+        {"match": {"rest": True}, "space": "t", "branch": "Доклады"},
+    ]}, allow_unicode=True), encoding="utf-8")
+    assert core.events_of(tmp_path, for_upload=True) == ["Доклады"]
+    assert core.events_of(tmp_path) == ["Концерт", "Курс Python", "Доклады"], "правка на сайте видит все"
+    with pytest.raises(core.Refused):
+        core.validate({"title": "Норм", "date": "2026-03-12", "video": "a.mp4", "event": "Курс Python"}, tmp_path)
+    m = core.validate({"title": "Норм", "date": "2026-03-12", "video": "a.mp4", "event": "Доклады",
+                       "tags": ["Концерт", "kafka"]}, tmp_path)
+    assert m.tags == ["kafka"], "метка принудительного правила снимается у загрузки"
+
+
 def test_only_listed_files_are_accepted():
     assert core.accept_name("artifact.json") and core.accept_name("video.webm") and core.accept_name("slides.zip")
     for bad in ("../x", "record.md", "video.exe", "artifact.json.bak", ""):
