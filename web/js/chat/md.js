@@ -6,8 +6,8 @@
 // черту `---`, формулы TeX и наши маркеры цитат [N].
 //
 // Формулы: модели пишут LaTeX — `\(…\)` и `\[…\]` (так deepseek), `$…$` и `$$…$$`
-// (так многие другие). Здесь формула только ВЫРЕЗАЕТСЯ из текста — до разбора
-// разметки, иначе `_` и `*` внутри TeX стали бы курсивом, — и кладётся узлом
+// (так многие другие). Здесь формула на время разбора разметки прячется за меткой
+// (иначе `_` и `*` внутри TeX стали бы курсивом, см. MASK) и кладётся узлом
 // `.math[data-tex]` с исходником внутри; набирает её KaTeX (`ui/math.js`).
 import { el } from "../ui/dom.js";
 
@@ -246,54 +246,69 @@ function withClaims(node, text, makeRef, onClaim) {
 // пишет URL как придётся — просили markdown-ссылку, получили `**адрес**`
 // жирным. Полагаться на её разметку нельзя, поэтому ловим сам адрес.
 // Схема обязательна: без неё под «адрес» подошли бы `config.yml/x` и `и т.д./`.
-const BARE_URL = /https?:\/\/[^\s<>()[\]«»"']+/g;
+const BARE_URL = /https?:\/\/[^\s<>()[\]«»"']+/g;
 const URL_TAIL = /[.,;:!?»)]+$/; // точка в конце предложения — не часть адреса
 
-function withLinks(node, text) {
+// Формула на время разбора разметки — непрозрачная метка «N» (символы
+// частной области Юникода, в тексте модели их не бывает). Вырезать формулу из
+// текста совсем нельзя: модель пишет `**\(b\)**` и «**…параметров \(b\)**» —
+// без метки звёздочки оказывались по разные стороны формулы, и жирный не узнавался
+// (живой ответ, 05.10). С меткой жирный/курсив видят формулу как обычное слово,
+// а TeX внутри (`_`, `*`, `[…]`) разметке недоступен.
+const MASK = /(\d+)/g;
+const unmask = (text, maths) => (maths ? text.replace(MASK, (_, i) => maths[i][0]) : text);
+
+/** Текст в узел; метки формул — обратно в формулы. */
+function put(node, text, maths) {
+  if (!maths) return void node.append(text);
+  let last = 0;
+  for (const m of text.matchAll(MASK)) {
+    if (m.index > last) node.append(text.slice(last, m.index));
+    const [whole, paren, bracket, dollars, dollar] = maths[Number(m[1])];
+    node.append(mathNode(paren ?? bracket ?? dollars ?? dollar, Boolean(bracket ?? dollars), whole));
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) node.append(text.slice(last));
+}
+
+function withLinks(node, text, maths) {
   let last = 0;
   for (const m of String(text).matchAll(BARE_URL)) {
     const url = m[0].replace(URL_TAIL, "");
     if (!url) continue;
-    if (m.index > last) node.append(text.slice(last, m.index));
+    if (m.index > last) put(node, text.slice(last, m.index), maths);
     node.append(el("a", { href: url, target: "_blank", rel: "noopener", text: url }));
     last = m.index + url.length;
   }
-  if (last < text.length) node.append(text.slice(last));
+  if (last < text.length) put(node, text.slice(last), maths);
   return node;
 }
 
-// Формулы вырезаются ДО разметки: в TeX полно `_`, `*` и `[…]`.
 function inlineInto(node, text, makeRef) {
   const src = String(text);
-  let last = 0;
-  for (const m of src.matchAll(MATH_INLINE)) {
-    if (m.index > last) inlinePlain(node, src.slice(last, m.index), makeRef);
-    const [whole, paren, bracket, dollars, dollar] = m;
-    node.append(mathNode(paren ?? bracket ?? dollars ?? dollar, Boolean(bracket ?? dollars), whole));
-    last = m.index + whole.length;
-  }
-  if (last < src.length) inlinePlain(node, src.slice(last), makeRef);
-  return node;
+  const maths = [];
+  const masked = src.replace(MATH_INLINE, (...m) => `${maths.push(m.slice(0, 5)) - 1}`);
+  return inlinePlain(node, maths.length ? masked : src, makeRef, maths.length ? maths : null);
 }
 
-function inlinePlain(node, text, makeRef) {
+function inlinePlain(node, text, makeRef, maths) {
   let last = 0;
   for (const m of String(text).matchAll(INLINE)) {
-    if (m.index > last) withLinks(node, text.slice(last, m.index));
+    if (m.index > last) withLinks(node, text.slice(last, m.index), maths);
     const [, bold, boldAlt, code, refNum, linkText, linkUrl, italic] = m;
 
     // Внутри жирного и курсива адрес тоже бывает — там его и ловим.
-    if (bold || boldAlt) node.append(withLinks(el("strong"), bold || boldAlt));
-    else if (code) node.append(el("code", { text: code })); // в коде адрес — это текст
+    if (bold || boldAlt) node.append(withLinks(el("strong"), bold || boldAlt, maths));
+    else if (code) node.append(el("code", { text: unmask(code, maths) })); // в коде адрес и TeX — текст
     else if (refNum) {
       const ref = makeRef?.(Number(refNum));
       node.append(ref || m[0]); // цитаты нет — оставляем как было, не врём ссылкой
     } else if (linkText) {
-      node.append(el("a", { href: linkUrl, target: "_blank", rel: "noopener", text: linkText }));
-    } else if (italic) node.append(withLinks(el("em"), italic));
+      node.append(el("a", { href: linkUrl, target: "_blank", rel: "noopener", text: unmask(linkText, maths) }));
+    } else if (italic) node.append(withLinks(el("em"), italic, maths));
 
     last = m.index + m[0].length;
   }
-  if (last < text.length) withLinks(node, text.slice(last));
+  if (last < text.length) withLinks(node, text.slice(last), maths);
   return node;
 }

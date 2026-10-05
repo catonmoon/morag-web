@@ -81,7 +81,11 @@ export function typesetMath(root) {
     return;
   }
   for (const node of nodes) {
-    const html = texToHtml(katex, node.dataset.tex || "", node.classList.contains("math-display"));
+    let tex = node.dataset.tex || "";
+    // Формула в жирном (`**\(Y\)** — …`): KaTeX рисует своими шрифтами и font-weight
+    // не наследует — без \boldsymbol она выпадала бы из выделения.
+    if (node.closest?.("strong, b")) tex = `\\boldsymbol{${tex}}`;
+    const html = texToHtml(katex, tex, node.classList.contains("math-display"));
     if (html) node.innerHTML = html;
     else node.classList.add("math-bad");
     node.classList.add("math-done");

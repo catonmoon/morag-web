@@ -263,6 +263,25 @@ check("подчёркивания и звёздочки внутри TeX не с
   assert.equal(ems[0].textContent, "курсив");
 });
 
+check("жирный вокруг формулы и через формулу — жирный, формула внутри", () => {
+  // живой ответ 05.10: «**\(Y\)** — зависимая» и «**линейной относительно \(b\)**»
+  const one = renderMarkdown("- **\\(Y\\)** — зависимая переменная.");
+  const strong = one.kids[0].kids[0].kids.find((k) => k.tagName === "STRONG");
+  assert.ok(strong, flat(one));
+  assert.equal(maths(strong)[0]?.tex, "Y");
+  assert.ok(!flat(one).includes("**"), flat(one));
+  const two = renderMarkdown("Модель **линейна относительно \\(b\\)**, даже если \\(f\\) нелинейна.");
+  const s2 = two.kids[0].kids.find((k) => k.tagName === "STRONG");
+  assert.ok(s2 && s2.textContent.startsWith("линейна относительно"), flat(two));
+  assert.deepEqual(maths(two).map((m) => m.tex), ["b", "f"]);
+});
+
+check("в `коде` TeX остаётся текстом, а не меткой", () => {
+  const frag = renderMarkdown("Пишите `\\(x\\)` так.");
+  assert.ok(flat(frag).includes("\\(x\\)"), JSON.stringify(flat(frag)));
+  assert.ok(!/[]/.test(flat(frag)));
+});
+
 check("$…$ — формула, а «от $5 до $10» — нет", () => {
   assert.deepEqual(maths(renderMarkdown("Сумма $a+b$ и $$x^2$$ в строке.")).map((m) => [m.tex, m.display]),
     [["a+b", false], ["x^2", true]]);
