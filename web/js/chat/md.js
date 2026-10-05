@@ -2,8 +2,13 @@
 //
 // Строим DOM-узлы, а не строку HTML: текст ответа сочиняет модель, и innerHTML
 // на нём — это дыра для инъекции. Поддерживаем ровно то, что модель реально
-// использует: абзацы, заголовки, списки, **жирный**, *курсив*, `код`, ссылки
-// и наши маркеры цитат [N].
+// использует: абзацы, заголовки, списки, **жирный**, *курсив*, `код`, ссылки,
+// черту `---`, формулы TeX и наши маркеры цитат [N].
+//
+// Формулы: модели пишут LaTeX — `\(…\)` и `\[…\]` (так deepseek), `$…$` и `$$…$$`
+// (так многие другие). Здесь формула только ВЫРЕЗАЕТСЯ из текста — до разбора
+// разметки, иначе `_` и `*` внутри TeX стали бы курсивом, — и кладётся узлом
+// `.math[data-tex]` с исходником внутри; набирает её KaTeX (`ui/math.js`).
 import { el } from "../ui/dom.js";
 
 const INLINE =
@@ -12,6 +17,29 @@ const INLINE =
 const HEADING = /^(#{1,6})\s+(.*)$/;
 const BULLET = /^\s*[-*•]\s+(.*)$/;
 const ORDERED = /^\s*\d+[.)]\s+(.*)$/;
+const RULE = /^(?:-{3,}|\*{3,}|_{3,})$/;
+
+// Формула в строке. `$…$` — по правилу pandoc: после открывающего и перед
+// закрывающим нет пробела, за закрывающим нет цифры — иначе «от $5 до $10»
+// стало бы формулой. Группы: 1 `\(…\)`, 2 `\[…\]`, 3 `$$…$$`, 4 `$…$`.
+const MATH_INLINE =
+  /\\\(([\s\S]+?)\\\)|\\\[([\s\S]+?)\\\]|\$\$([^$]+?)\$\$|(?<![\\$])\$(?=[^\s$])([^$\n]*?[^\s\\$])\$(?![\d$])/g;
+// Формула блоком: строка начинается с `\[` или `$$`, конец — та же или одна из следующих.
+const MATH_FENCES = { "\\[": "\\]", $$: "$$" };
+
+function mathNode(tex, display, source, tag = "span") {
+  return el(tag, {
+    class: display ? "math math-display" : "math",
+    "data-tex": tex.trim(),
+    text: source, // пока KaTeX не набрал (или не смог) — виден исходник
+  });
+}
+
+/** Отрезки текста, занятые формулами: внутри них нет ни сносок, ни границ предложений. */
+function mathRanges(src) {
+  return [...src.matchAll(MATH_INLINE)].map((m) => [m.index, m.index + m[0].length]);
+}
+const inside = (ranges, i) => ranges.some(([a, b]) => i > a && i < b);
 
 /**
  * @param {string} text  сырой текст ответа
@@ -30,6 +58,7 @@ export function renderMarkdown(text, { makeRef, onClaim } = {}) {
 
   let paragraph = [];  // копим строки обычного текста
   let list = null;     // текущий список
+  let math = null;     // формула блоком, которая ещё не закрылась: {close, lines}
 
   const flushParagraph = () => {
     if (!paragraph.length) return;
@@ -47,8 +76,42 @@ export function renderMarkdown(text, { makeRef, onClaim } = {}) {
 
   for (const raw of lines) {
     const line = raw.trim();
+
+    if (math) {
+      math.lines.push(line);
+      if (line.endsWith(math.close)) {
+        const source = math.lines.join("\n");
+        frag.append(mathNode(source.slice(math.open.length, -math.close.length), true, source, "div"));
+        math = null;
+      }
+      continue;
+    }
+
     if (!line) {
       flushAll();
+      continue;
+    }
+
+    const open = line.startsWith("\\[") ? "\\[" : line.startsWith("$$") ? "$$" : null;
+    if (open) {
+      const close = MATH_FENCES[open];
+      const at = line.indexOf(close, open.length);
+      if (at === -1) {
+        flushAll(); // открылась и не закрылась на этой строке — копим до закрывающей
+        math = { open, close, lines: [line] };
+        continue;
+      }
+      if (at === line.length - close.length) {
+        flushAll();
+        frag.append(mathNode(line.slice(open.length, at), true, line, "div"));
+        continue;
+      }
+      // `\[…\]` и дальше текст — это формула в строке, её разберёт inlineInto
+    }
+
+    if (RULE.test(line)) {
+      flushAll();
+      frag.append(el("hr"));
       continue;
     }
 
@@ -83,6 +146,8 @@ export function renderMarkdown(text, { makeRef, onClaim } = {}) {
     flushList();
     paragraph.push(line);
   }
+  // Блок так и не закрылся (оборван ответ) — показываем как текст, ничего не теряя.
+  if (math) paragraph.push(...math.lines);
   flushAll();
   return frag;
 }
@@ -92,6 +157,21 @@ export function renderMarkdown(text, { makeRef, onClaim } = {}) {
 // пункта, и без этого «предложение» уползало в соседний.
 const CLAIM_EDGE = /[.!?…]\s|\n/g;
 const CLAIM_MAX = 260; // длиннее — уже не «утверждение», а пересказ ответа
+
+/** Границы предложений вне формул: точка в `\(0.17\)` или `\(x. y\)` — не конец. */
+function claimEdges(src, ranges) {
+  return [...src.matchAll(CLAIM_EDGE)]
+    .filter((e) => !inside(ranges, e.index))
+    .map((e) => ({ start: e.index, end: e.index + e[0].length }));
+}
+
+/** Утверждение вокруг сноски: от конца предыдущего предложения до конца текущего. */
+function claimSpan(edges, at, floor, length) {
+  let from = floor;
+  for (const e of edges) if (e.end <= at && e.start >= floor) from = e.end;
+  const tail = edges.find((e) => e.start >= at);
+  return [from, tail ? tail.end : length];
+}
 
 /**
  * Утверждения ответа по номерам цитат: `[N]` → предложения, где он стоит.
@@ -105,21 +185,15 @@ const CLAIM_MAX = 260; // длиннее — уже не «утверждени�
 export function claimsByRef(text) {
   const src = String(text || "").replace(/\r\n/g, "\n");
   const out = new Map();
+  const ranges = mathRanges(src);
+  const edges = claimEdges(src, ranges);
   for (const m of src.matchAll(/\[(\d+)\]/g)) {
     const n = Number(m.group?.[1] ?? m[1]);
-    if (!Number.isFinite(n)) continue;
+    if (!Number.isFinite(n) || inside(ranges, m.index)) continue;
 
     // Границы предложения вокруг маркера: назад — до конца предыдущего,
     // вперёд — до конца текущего.
-    let from = 0;
-    CLAIM_EDGE.lastIndex = 0;
-    for (const edge of src.slice(0, m.index).matchAll(CLAIM_EDGE)) {
-      from = edge.index + edge[0].length;
-    }
-    const rest = src.slice(m.index);
-    const tail = CLAIM_EDGE.exec(rest);
-    CLAIM_EDGE.lastIndex = 0;
-    const to = m.index + (tail ? tail.index + tail[0].length : rest.length);
+    const [from, to] = claimSpan(edges, m.index, 0, src.length);
 
     let claim = src
       .slice(from, to)
@@ -145,20 +219,15 @@ export function claimsByRef(text) {
  */
 function withClaims(node, text, makeRef, onClaim) {
   const src = String(text);
-  const marks = [...src.matchAll(/\[(\d+)\]/g)];
+  const ranges = mathRanges(src);
+  const marks = [...src.matchAll(/\[(\d+)\]/g)].filter((m) => !inside(ranges, m.index));
   if (!marks.length) return inlineInto(node, src, makeRef);
+  const edges = claimEdges(src, ranges);
 
   let cursor = 0;
   for (const mark of marks) {
     if (mark.index < cursor) continue; // сноска внутри уже обёрнутого предложения
-    let from = cursor;
-    for (const edge of src.slice(cursor, mark.index).matchAll(CLAIM_EDGE)) {
-      from = cursor + edge.index + edge[0].length;
-    }
-    const rest = src.slice(mark.index);
-    const tail = CLAIM_EDGE.exec(rest);
-    CLAIM_EDGE.lastIndex = 0;
-    const to = mark.index + (tail ? tail.index + tail[0].length : rest.length);
+    const [from, to] = claimSpan(edges, mark.index, cursor, src.length);
 
     if (from > cursor) inlineInto(node, src.slice(cursor, from), makeRef);
     const claim = el("span", { class: "claim", "data-n": mark[1] });
@@ -193,7 +262,21 @@ function withLinks(node, text) {
   return node;
 }
 
+// Формулы вырезаются ДО разметки: в TeX полно `_`, `*` и `[…]`.
 function inlineInto(node, text, makeRef) {
+  const src = String(text);
+  let last = 0;
+  for (const m of src.matchAll(MATH_INLINE)) {
+    if (m.index > last) inlinePlain(node, src.slice(last, m.index), makeRef);
+    const [whole, paren, bracket, dollars, dollar] = m;
+    node.append(mathNode(paren ?? bracket ?? dollars ?? dollar, Boolean(bracket ?? dollars), whole));
+    last = m.index + whole.length;
+  }
+  if (last < src.length) inlinePlain(node, src.slice(last), makeRef);
+  return node;
+}
+
+function inlinePlain(node, text, makeRef) {
   let last = 0;
   for (const m of String(text).matchAll(INLINE)) {
     if (m.index > last) withLinks(node, text.slice(last, m.index));

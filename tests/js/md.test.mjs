@@ -46,6 +46,7 @@ class Frag extends Node_ {
   }
 }
 globalThis.document = {
+  compatMode: "CSS1Compat", // иначе KaTeX ворчит про quirks mode
   createElement: (tag) => new Node_(tag),
   createDocumentFragment: () => new Frag(),
   createTextNode: (t) => String(t),
@@ -214,6 +215,99 @@ check("без схемы адресом не считаем — иначе им 
 
 check("в `коде` адрес остаётся текстом", () => {
   assert.equal(links(renderMarkdown("запусти `curl https://example.com/a`")).length, 0);
+});
+
+// --- формулы ---------------------------------------------------------------
+// Модель пишет LaTeX: deepseek — `\(…\)` и `\[…\]`, другие — `$…$` и `$$…$$`. Разбор
+// только вырезает формулу узлом `.math[data-tex]`; набирает её KaTeX (ui/math.js).
+console.log("\nформулы:");
+const maths = (frag) => {
+  const found = [];
+  const walk = (n) => {
+    for (const k of n.kids || []) {
+      if (typeof k === "string") continue;
+      if (/\bmath\b/.test(k.attrs.class || "")) {
+        found.push({ tag: k.tagName, tex: k.attrs["data-tex"], display: k.attrs.class.includes("math-display") });
+      }
+      walk(k);
+    }
+  };
+  walk(frag);
+  return found;
+};
+
+check("\\(…\\) в строке — формула, текст вокруг цел", () => {
+  const frag = renderMarkdown("Пусть \\(P(X)\\) — вероятность события \\(X\\).");
+  assert.deepEqual(maths(frag).map((m) => m.tex), ["P(X)", "X"]);
+  assert.ok(frag.kids[0].textContent.includes("— вероятность события"));
+});
+
+check("\\[…\\] на своей строке — блок", () => {
+  const frag = renderMarkdown("Тогда:\n\n\\[ c = \\sqrt{a^2 + b^2} \\]\n\nи дальше.");
+  assert.deepEqual(tags(frag), ["P", "DIV", "P"]);
+  assert.deepEqual(maths(frag), [{ tag: "DIV", tex: "c = \\sqrt{a^2 + b^2}", display: true }]);
+});
+
+check("блок на несколько строк, пустая строка внутри не рвёт", () => {
+  const frag = renderMarkdown("$$\n\\sum_{i=1}^{n} x_i\n\n= S\n$$\nпосле");
+  const [m] = maths(frag);
+  assert.ok(m.display && m.tex.includes("\\sum_{i=1}^{n} x_i") && m.tex.includes("= S"), m.tex);
+  assert.ok(flat(frag).includes("после"));
+});
+
+check("подчёркивания и звёздочки внутри TeX не становятся курсивом", () => {
+  const frag = renderMarkdown("Вес \\(w_1 * x_1 + w_2 * x_2\\) и *курсив*.");
+  assert.equal(maths(frag)[0].tex, "w_1 * x_1 + w_2 * x_2");
+  const ems = frag.kids[0].kids.filter((k) => k.tagName === "EM");
+  assert.equal(ems.length, 1);
+  assert.equal(ems[0].textContent, "курсив");
+});
+
+check("$…$ — формула, а «от $5 до $10» — нет", () => {
+  assert.deepEqual(maths(renderMarkdown("Сумма $a+b$ и $$x^2$$ в строке.")).map((m) => [m.tex, m.display]),
+    [["a+b", false], ["x^2", true]]);
+  assert.equal(maths(renderMarkdown("Стоит от $5 до $10 в месяц.")).length, 0);
+});
+
+check("точка внутри формулы — не конец утверждения", () => {
+  const claims = claimsByRef("Если шансы 1 к 6, то \\(OR = 1/6 \\approx 0.17\\). Логарифм \\(\\log 6 \\approx 1.79\\) симметричен [2].");
+  assert.equal(claims.get(2)[0], "Логарифм \\(\\log 6 \\approx 1.79\\) симметричен [2].");
+});
+
+check("сноска рядом с формулой остаётся сноской", () => {
+  const frag = renderMarkdown("Значение \\(\\log 6\\) положительно [3].", { makeRef: (n) => `REF${n}` });
+  assert.ok(flat(frag).includes("REF3"), flat(frag));
+});
+
+check("незакрытый блок не теряется — остаётся текстом", () => {
+  const frag = renderMarkdown("\\[ a = b\nи всё");
+  assert.equal(maths(frag).length, 0);
+  assert.ok(flat(frag).includes("a = b") && flat(frag).includes("и всё"));
+});
+
+check("--- — горизонтальная черта", () => {
+  assert.deepEqual(tags(renderMarkdown("раз\n\n---\n\nдва")), ["P", "HR", "P"]);
+});
+
+// Сам KaTeX — тот, что лежит у сайта: набирает, битое не роняет, опасное не пускает.
+const { createRequire } = await import("node:module");
+globalThis.katex = createRequire(import.meta.url)(join(repo, "web/assets/vendor/katex/katex.min.js"));
+const { texToHtml } = await import(join(repo, "web/js/ui/math.js"));
+check("KaTeX набирает дробь", () => {
+  const html = texToHtml(globalThis.katex, "\\frac{a}{1-a}", true);
+  assert.ok(html && html.includes("katex-display") && html.includes("mfrac"), html?.slice(0, 80));
+});
+check("битая формула → null (покажем исходник)", () => {
+  assert.equal(texToHtml(globalThis.katex, "\\frac{a}{", false), null);
+});
+check("\\href и \\url не проходят (trust: false)", () => {
+  for (const tex of ["\\href{javascript:alert(1)}{x}", "\\url{https://example.com}"]) {
+    const html = texToHtml(globalThis.katex, tex, false);
+    assert.ok(!html || !/<a\s|href=/.test(html), html);
+  }
+});
+check("слишком длинная — не набираем", () => {
+  assert.equal(texToHtml(globalThis.katex, "x+".repeat(1500) + "x", false), null);
 });
 
 console.log(failures ? `\n${failures} провал(ов)` : "\nвсё зелёное");

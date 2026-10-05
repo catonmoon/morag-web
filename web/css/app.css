@@ -632,6 +632,17 @@ footer .disc{margin-left:auto;font-style:italic;opacity:.85;text-align:right}
 .answer ul,.answer ol{margin:.5em 0 .8em;padding-left:1.35em}
 .answer li{margin:.25em 0}
 .answer li::marker{color:var(--accent)}
+/* Формулы (KaTeX, `ui/math.js`). Блок — по центру, длинный уезжает вбок прокруткой, а не
+   рвёт колонку. Цвет — от текста (KaTeX рисует currentColor): тёмная и светлая темы сами.
+   Пока не набрано или не набралось — исходник моноширинным, чтобы читалось как код. */
+.answer .math-display{display:block;margin:.7em 0;overflow-x:auto;overflow-y:hidden;
+  text-align:center;padding:.15em 0}
+.answer .katex{font-size:1.08em}
+.answer .math-display .katex-display{margin:0}
+.answer .math:not(.math-done),.answer .math-bad{font-family:var(--mono);font-size:.92em}
+.answer .math-display:not(.math-done),.answer .math-display.math-bad{text-align:left;white-space:pre-wrap}
+.answer .katex{overflow-wrap:normal}
+.answer hr{border:0;border-top:1px solid var(--line-soft);margin:1.2em 0}
 .answer strong{font-weight:700}
 .answer em{font-style:italic}
 .answer code{font-family:var(--mono);font-size:.86em;background:var(--surface-2);

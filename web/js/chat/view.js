@@ -2,6 +2,7 @@
 import { el, splitIcon, toast } from "../ui/dom.js";
 import { momentsBlock } from "./moments-block.js";
 import { renderMarkdown, claimsByRef } from "./md.js";
+import { typesetMath } from "../ui/math.js";
 
 const CHEV =
   '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
@@ -239,6 +240,7 @@ export function createTurn(question, { context = null, onOpenRecord, onShareMome
         onClaim: (n, node) => claimNodes.set(n, [...(claimNodes.get(n) || []), node]),
       })
     );
+    typesetMath(answer);
     if (streaming) answer.lastElementChild?.append(caret); // курсор бежит за текстом
   }
 
@@ -248,7 +250,12 @@ export function createTurn(question, { context = null, onOpenRecord, onShareMome
     const open = (tail.match(/\*\*/g) || []).length;
     let cut = text;
     if (open % 2 === 1) cut = cut.slice(0, cut.lastIndexOf("**"));
-    return cut.replace(/(?:\*|`|\[)\s*$/, "");
+    // Формула, которая ещё печатается, — сырой TeX мелькал бы до закрывающей скобки.
+    for (const [o, c] of [["\\(", "\\)"], ["\\[", "\\]"]]) {
+      if (cut.lastIndexOf(o) > cut.lastIndexOf(c)) cut = cut.slice(0, cut.lastIndexOf(o));
+    }
+    if ((cut.match(/\$\$/g) || []).length % 2 === 1) cut = cut.slice(0, cut.lastIndexOf("$$"));
+    return cut.replace(/(?:\*|`|\[|\\)\s*$/, "");
   }
 
   function refLink(n) {
