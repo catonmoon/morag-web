@@ -128,6 +128,8 @@ check("порядок раздела приходит с сервера, а не
   assert.equal(sortFor(state({ section: "Курс" }), reading), "old");
   // Выбор человека сильнее умолчания: иначе сортировку нельзя было бы переспорить.
   assert.equal(sortFor(state({ section: "Курс", sort: "new" }), reading), "new");
+  // Курс из записей разных лет: порядок — по номеру в названии, а не по дате.
+  assert.equal(sortFor(state({}), { default: "title", sections: {} }), "title");
 });
 
 console.log("фасеты:");

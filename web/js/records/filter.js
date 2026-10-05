@@ -101,6 +101,8 @@ export function sortFor(state, reading = {}) {
   if (state.sort) return state.sort;
   const sections = reading.sections || {};
   const direction = state.section ? sections[state.section] : reading.default;
+  // `title` — порядок курса по номеру в названии (content.order в site.yml).
+  if (direction === "title") return "title";
   return direction === "asc" ? "old" : "new";
 }
 

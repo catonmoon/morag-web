@@ -108,6 +108,19 @@ def test_fresh_records_first(tmp_path: Path):
     assert [r.id for r in index.all()] == ["2026-05-30-свежая", "2026-01-10-старая"]
 
 
+def test_course_order_by_number_in_title(tmp_path: Path):
+    """`order: title` — порядок курса по номеру в названии: записи разных лет («4.1» снята раньше
+    «1»), дата порядка не знает; «10» — после «9», «4.2» — после «4.1»."""
+    root = tmp_path / "c"
+    for name, title, date in [("a", "Лекция 10. Итог", "2025-03-01"), ("b", "Лекция 4.2. Б", "2023-10-27"),
+                              ("c", "Лекция 1. Начало", "2025-02-07"), ("d", "Лекция 4.1. А", "2023-10-27")]:
+        (root / name).mkdir(parents=True)
+        (root / name / "record.md").write_text(head(title=title, date=date), encoding="utf-8")
+    index = RecordIndex(root, order="title")
+    assert [r.title.split(".")[0] for r in index.all()] == ["Лекция 1", "Лекция 4", "Лекция 4", "Лекция 10"]
+    assert [r.id for r in index.all()] == ["c", "d", "b", "a"]
+
+
 def test_record_without_title_or_date_is_skipped(tmp_path: Path):
     """Битая запись не должна ронять весь раздел — её просто не видно."""
     index = make_corpus(tmp_path, {

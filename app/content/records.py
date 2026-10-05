@@ -285,6 +285,10 @@ class RecordIndex:
         Сортировка устойчива, поэтому первый проход (id) переживает второй (дата).
         """
         out = sorted(items, key=lambda r: natural_key(r.id))
+        # `title` — порядок курса по номеру в названии («Лекция 4.1» < «Лекция 4.2» < «Лекция 10»):
+        # у курса, собранного из записей разных лет, дата порядка не знает (владелец, 05.10).
+        if order == "title":
+            return sorted(out, key=lambda r: natural_key(r.title))
         out.sort(key=lambda r: r.date, reverse=(order != "asc"))
         return out
 
