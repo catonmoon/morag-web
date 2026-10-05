@@ -173,3 +173,16 @@ def test_маленький_знак_кеглем_слова(tmp_path):
     assert mark_payload({"mark": "mark.txt", "mark_size": "word"}, lambda name: root / name)["size"] == "word"
     assert "size" not in mark_payload({"mark": "mark.txt"}, lambda name: root / name)
     assert "size" not in mark_payload({"mark": "mark.txt", "mark_size": "огромный"}, lambda name: root / name)
+
+
+def test_знак_из_нескольких_кадров_в_одной_сетке(tmp_path):
+    """`mark` списком — кадры для смены по наведению; выравниваются в одну сетку (по вертикали по
+    центру, по горизонтали блоком вправо — к слову), иначе шапка прыгала бы. Битый файл в списке
+    выпадает, остальные остаются."""
+    (tmp_path / "a.txt").write_text("ab\ncd\nef\n", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("xyz\n", encoding="utf-8")
+    find = lambda name: tmp_path / name if (tmp_path / name).exists() else None  # noqa: E731
+    out = mark_payload({"mark": ["a.txt", "нет.txt", "b.txt"]}, find)
+    assert out["frames"] == [[" ab", " cd", " ef"], ["   ", "xyz", "   "]]
+    assert out["lines"] == out["frames"][0]
+    assert "frames" not in mark_payload({"mark": ["a.txt"]}, find)

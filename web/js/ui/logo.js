@@ -6,7 +6,7 @@
 // он для мира без скриптов. Поле общее на рисунок и слово, поэтому волна крутится вокруг
 // всего знака.
 import { $, reducedMotion } from "./dom.js";
-import { renderMark, renderText, startIdle, layout } from "./mark.js";
+import { morphFrames, renderMark, renderText, startIdle, layout } from "./mark.js";
 import * as boxfont from "./boxfont.js";
 import { DEFAULT_WORDMARK } from "./brand.js";
 import { drive as driveHalo, haloOptions, live as haloLive, withoutShadow } from "./halo.js";
@@ -19,6 +19,8 @@ const SCALE = 11 / 4;
 
 let stopIdle = () => {};
 let acts = null;
+// Знак из нескольких кадров: что сейчас нарисовано и как перерисовать (см. `nextFrame`).
+let shown = null;   // {host, field, art, index, timer}
 
 /** Смонтировать знак по бренду. Можно звать повторно — прежний покой снимается. */
 export function showMark(brand = {}) {
@@ -33,6 +35,8 @@ export function showMark(brand = {}) {
   const { field, ox, oy, sx, sy } = layout(art, lines, art && !wordSize ? SCALE : 1);
   acts = renderMark(markHost, field, art);
   markHost.hidden = !art;
+  if (shown?.timer) clearInterval(shown.timer);
+  shown = art?.frames?.length > 1 ? { host: markHost, field, art, index: 0, timer: null } : null;
   markHost.classList.toggle("word-size", wordSize);
   renderText(wordHost, lines, field, { ox, oy, sx, sy });
   // Подпись под словом: у корпуса со своим словом — «morag» (на чём сделано), у платформы — «web».
@@ -67,6 +71,29 @@ export function showMark(brand = {}) {
   return acts;
 }
 
+/**
+ * Следующий кадр знака — по наведению (владелец, 05.10: «только при наведении»): клетки
+ * пересыпаются за ~0.3 с; при «уменьшить движение» — сразу. Пока идёт пересыпание, новое
+ * наведение его не перезапускает.
+ */
+function nextFrame() {
+  if (!shown || shown.timer) return;
+  const { host, field, art } = shown;
+  const from = art.frames[shown.index];
+  shown.index = (shown.index + 1) % art.frames.length;
+  const to = art.frames[shown.index];
+  const draw = (lines) => { renderMark(host, field, { ...art, lines }); };
+  if (reducedMotion()) { draw(to); return; }
+  const steps = morphFrames(from, to, 7);
+  let k = 0;
+  shown.timer = setInterval(() => {
+    if (k < steps.length) { draw(steps[k++]); return; }
+    clearInterval(shown.timer);
+    shown.timer = null;
+    draw(to);
+  }, 45);
+}
+
 /** Слушатели наведения — один раз; знак под ними может пересобираться. */
 export function initLogo() {
   const wordHost = $("#logo-word");
@@ -79,6 +106,7 @@ export function initLogo() {
   logo.addEventListener("mouseenter", () => {
     // Наведение — повод нюхнуть: жест по действию человека, а не по таймеру.
     acts?.sniff();
+    nextFrame();
     if (haloLive() && !reducedMotion()) {
       run?.stop();
       // Светлая тема — без теней (владелец, 16.09): на белой шапке свечение читается как

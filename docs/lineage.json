@@ -241,6 +241,9 @@
     "tests/js/letter-cloud.test.mjs": {
       "status": "ours"
     },
+    "tests/js/mark-morph.test.mjs": {
+      "status": "ours"
+    },
     "tests/js/marks.test.mjs": {
       "status": "ours"
     },

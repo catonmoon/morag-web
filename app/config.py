@@ -597,6 +597,29 @@ INHERITED_BRAND = ("cover", "mark", "mark_face", "mark_size", "wordmark")
 MARK_MAX_ROWS, MARK_MAX_COLS = 40, 160
 
 
+def _mark_lines(name: str, find_file) -> list[str] | None:
+    """Строки рисунка из файла бренда; пустой хвост срезан; слишком большой — None."""
+    path = find_file(name)
+    if path is None:
+        return None
+    lines = [ln.rstrip("\n").expandtabs(4) for ln in path.read_text(encoding="utf-8").splitlines()]
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not lines or len(lines) > MARK_MAX_ROWS or max(len(ln) for ln in lines) > MARK_MAX_COLS:
+        return None
+    return lines
+
+
+def _pad_frame(lines: list[str], rows: int, cols: int) -> list[str]:
+    """Кадр — в общую сетку: по вертикали по центру, по горизонтали ЦЕЛЫМ БЛОКОМ к правому краю —
+    к слову: зазор знак↔слово (пробел рамочного шрифта) одинаков у всех кадров, а узкий кадр,
+    прижатый влево, отъезжал бы от слова на пустые колонки (замерено 05.10)."""
+    width = max((len(ln) for ln in lines), default=0)
+    top = (rows - len(lines)) // 2
+    body = [""] * top + lines + [""] * (rows - len(lines) - top)
+    return [" " * (cols - width) + ln.ljust(width) for ln in body]
+
+
 def mark_payload(brand: dict, find_file) -> dict | None:
     """Знак из бренда — рисунок ASCII файлом (`brand.mark`) и клетки мордочки (`brand.mark_face`)
     для моргания и «нюха». Рисунок — доменный (у нас это чужой зверь без лицензии), поэтому он
@@ -606,19 +629,21 @@ def mark_payload(brand: dict, find_file) -> dict | None:
     мордочки проверяются на попадание в сетку; кривые — молча отбрасываются (моргать нечем, но
     знак стоит). Только чистые типы: файл пишут руками.
     """
-    name = brand.get("mark")
-    if not isinstance(name, str) or not name:
+    names = brand.get("mark")
+    # Список файлов — знак из нескольких кадров: при наведении он перетекает в следующий
+    # (владелец, 05.10: «чтобы они менялись»). Кадры выравниваются в одну сетку — шапка не прыгает.
+    names = [names] if isinstance(names, str) else names if isinstance(names, list) else []
+    frames = [f for f in (_mark_lines(n, find_file) for n in names if isinstance(n, str) and n) if f]
+    if not frames:
         return None
-    path = find_file(name)
-    if path is None:
-        return None
-    lines = [ln.rstrip("\n").expandtabs(4) for ln in path.read_text(encoding="utf-8").splitlines()]
-    while lines and not lines[-1].strip():
-        lines.pop()
-    if not lines or len(lines) > MARK_MAX_ROWS or max(len(ln) for ln in lines) > MARK_MAX_COLS:
-        return None
-    rows, cols = len(lines), max(len(ln) for ln in lines)
+    rows = max(len(f) for f in frames)
+    cols = max(len(ln) for f in frames for ln in f)
+    if len(frames) > 1:
+        frames = [_pad_frame(f, rows, cols) for f in frames]
+    lines = frames[0]
     out: dict = {"lines": lines}
+    if len(frames) > 1:
+        out["frames"] = frames
     face = brand.get("mark_face") if isinstance(brand.get("mark_face"), dict) else {}
 
     def cell(v, lo, hi) -> int | None:

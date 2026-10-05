@@ -211,3 +211,23 @@ export function startIdle(acts, { disabled = false } = {}) {
   return () => clearTimeout(timer);
 }
 
+
+/**
+ * Перетекание знака из кадра в кадр (знак из нескольких рисунков, `brand.mark` списком): клетки
+ * меняются вразнобой, по порогу — у каждой свой момент смены. Возвращает промежуточные кадры
+ * БЕЗ последнего (последний — сам `to`). `rnd` — источник случайности (тест подставляет свой).
+ */
+export function morphFrames(from, to, steps = 6, rnd = Math.random) {
+  const rows = Math.max(from.length, to.length);
+  const grid = (lines) => Array.from({ length: rows }, (_, r) => [...(lines[r] || "")]);
+  const a = grid(from), b = grid(to);
+  const cols = Math.max(0, ...a.map((l) => l.length), ...b.map((l) => l.length));
+  const when = Array.from({ length: rows }, () => Array.from({ length: cols }, () => rnd()));
+  const out = [];
+  for (let k = 1; k < steps; k++) {
+    const t = k / steps;
+    out.push(Array.from({ length: rows }, (_, r) => Array.from({ length: cols },
+      (_, c) => (when[r][c] < t ? b[r][c] : a[r][c]) ?? " ").join("")));
+  }
+  return out;
+}
