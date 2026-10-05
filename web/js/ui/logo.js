@@ -22,6 +22,21 @@ let acts = null;
 // Знак из нескольких кадров: что сейчас нарисовано и как перерисовать (см. `nextFrame`).
 let shown = null;   // {host, field, art, index, timer}
 
+
+/** Строки справа от слова (`brand.wordmark_aside`): обычный текст, кириллица — то, чего рамочный
+ *  шрифт не умеет. Стоит после блока слова, зазор — тот же пробел рамочного шрифта. */
+function renderAside(brand) {
+  const word = $(".logo-word");
+  if (!word) return;
+  word.parentElement.querySelector(".logo-aside")?.remove();
+  const lines = Array.isArray(brand.wordmark_aside) ? brand.wordmark_aside.filter(Boolean) : [];
+  if (!lines.length) return;
+  const aside = document.createElement("span");
+  aside.className = "logo-aside";
+  lines.forEach((t) => { const row = document.createElement("span"); row.textContent = t; aside.append(row); });
+  word.after(aside);
+}
+
 /** Смонтировать знак по бренду. Можно звать повторно — прежний покой снимается. */
 export function showMark(brand = {}) {
   const markHost = $("#logo-mark"), wordHost = $("#logo-word");
@@ -44,6 +59,7 @@ export function showMark(brand = {}) {
   shown = art?.frames?.length > 1 ? { host: markHost, field, art, index: 0, timer: null } : null;
   markHost.classList.toggle("word-size", wordSize);
   renderText(wordHost, lines, field, { ox, oy, sx, sy });
+  renderAside(brand);
   // Подпись под словом: у корпуса со своим словом — «morag» (на чём сделано), у платформы — «web».
   const sub = $(".logo-word em");
   if (sub) sub.textContent = brand.wordmark ? "morag" : "web";
@@ -100,6 +116,7 @@ function showSvgMark(brand, markHost, wordHost) {
   shown = null;
   acts = { blink() {}, sniff() {}, live: false };
   renderText(wordHost, lines, field, { ox, oy, sx, sy });
+  renderAside(brand);
   const sub = $(".logo-word em");
   if (sub) sub.textContent = brand.wordmark ? "morag" : "web";
   const logo = $(".logo");

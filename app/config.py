@@ -594,7 +594,7 @@ def _halo_fields(raw: dict) -> dict:
 # Что пространство наследует от витрины, если не задало своё: картинка обложки, знак (рисунок
 # и клетки мордочки) и слово в шапке. Один рисунок на весь сайт, копия у каждого пространства —
 # лишнее место, где он разойдётся.
-INHERITED_BRAND = ("cover", "mark", "mark_face", "mark_size", "wordmark", "wordmark_weight")
+INHERITED_BRAND = ("cover", "mark", "mark_face", "mark_size", "wordmark", "wordmark_weight", "wordmark_aside")
 MARK_MAX_ROWS, MARK_MAX_COLS = 40, 160
 
 
@@ -879,6 +879,10 @@ class Corpus:
                 "mark": mark_payload(self.brand, self.brand_file),
                 "wordmark": str(self.brand.get("wordmark") or ""),
                 "wordmark_weight": str(self.brand.get("wordmark_weight") or ""),
+                # Строки обычным текстом справа от слова (рамочный шрифт — только латиница):
+                # «ML» + «курс по / классическим моделям». До трёх строк по 40 знаков.
+                "wordmark_aside": [str(x)[:40] for x in (self.brand.get("wordmark_aside") or [])
+                                   if isinstance(x, str)][:3],
                 "links": [
                     {"kind": l.get("kind"), "label": l.get("label"), "url": l.get("url")}
                     for l in (self.brand.get("links") or [])
@@ -964,6 +968,10 @@ class Hub:
             "mark": mark_payload(self.brand, lambda name: _inside(self.brand_dir, name)),
             "wordmark": str(self.brand.get("wordmark") or ""),
                 "wordmark_weight": str(self.brand.get("wordmark_weight") or ""),
+                # Строки обычным текстом справа от слова (рамочный шрифт — только латиница):
+                # «ML» + «курс по / классическим моделям». До трёх строк по 40 знаков.
+                "wordmark_aside": [str(x)[:40] for x in (self.brand.get("wordmark_aside") or [])
+                                   if isinstance(x, str)][:3],
             "theme": {
                 "mood": self.theme.get("mood"),
                 "tokens": self.theme.get("tokens", {}),

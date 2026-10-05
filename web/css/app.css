@@ -787,6 +787,10 @@ body[data-view="chat"] .chat-tools{display:flex}
 .logo-mark.sniffing .logo-nose{animation:logo-sniff .62s ease-in-out}
 
 .logo-word{display:block}
+/* Строки справа от слова (`brand.wordmark_aside`): обычный текст тем же моношрифтом шапки, по
+   высоте — в блок букв (три строки рамочного шрифта), выровнен по их верху. */
+.logo-aside{display:flex;flex-direction:column;justify-content:center;align-self:flex-start;
+  height:3em;font-size:1.05em;line-height:1.25;letter-spacing:.04em;color:var(--ink);white-space:nowrap}
 .logo-word-art{display:block;white-space:pre}
 .logo-word em{display:block;margin-top:.3em;font-style:normal;font-size:.8em;
   letter-spacing:.3em;color:var(--ink-faint)}

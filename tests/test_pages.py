@@ -95,6 +95,7 @@ def test_текст_экрана_отдаётся_только_по_разреш
     corpus = client.app.state.corpora[SLUG]
     assert corpus.public()["reader"] == {"frames": "strip", "frames_text": False}
     assert corpus.public()["calendar"] is True, "календарь по умолчанию есть (content.calendar)"
+    assert corpus.public()["brand"]["wordmark_aside"] == [], "строк справа от слова по умолчанию нет"
     frames = rec / "slides"
     frames.mkdir(exist_ok=True)
     saved = dict(corpus.reader)
