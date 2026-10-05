@@ -27,7 +27,8 @@ export function showMark(brand = {}) {
   stopIdle();
   const art = brand.mark && Array.isArray(brand.mark.lines) ? brand.mark : null;
   const lines = boxfont.render(brand.wordmark || DEFAULT_WORDMARK);
-  // `size: word` — знак кеглем слова (маленький рисунок в несколько строк): клетки совпадают.
+  // `size: word` — маленький рисунок в несколько строк рядом со словом: в поле знака клетки
+  // считаются как у слова (без пересчёта 11/4), а кегль подгоняется по высоте слова (ниже).
   const wordSize = art?.size === "word";
   const { field, ox, oy, sx, sy } = layout(art, lines, art && !wordSize ? SCALE : 1);
   acts = renderMark(markHost, field, art);
@@ -46,6 +47,21 @@ export function showMark(brand = {}) {
     logo.dataset.cols = field.cols;
     logo.dataset.rows = field.rows;
     logo.classList.toggle("no-art", !art);
+  }
+  // Маленький знак — РОВНО по высоте слова вместе с подписью (владелец, 04.10: кот как «ML CLASSIC
+  // с надписью morag» по высоте). Кегль считается от фактической высоты блока слова: строки
+  // знака при line-height 1 — это кегль × строки. Меряем после загрузки шрифтов — до неё высота
+  // подписи другая. Зазор остаётся в `ch` шрифта шапки (пробел рамочного набора).
+  markHost.style.fontSize = "";
+  if (wordSize && art.lines.length) {
+    const fit = () => {
+      // Блок слова — буквы ВМЕСТЕ с подписью (`.logo-word` = `#logo-word` + `<em>`).
+      const h = (wordHost.closest(".logo-word") || wordHost).getBoundingClientRect().height;
+      if (h > 0) markHost.style.fontSize = `${(h / art.lines.length).toFixed(2)}px`;
+      measureTopbar();
+    };
+    fit();
+    document.fonts?.ready.then(fit).catch(() => {});
   }
   measureTopbar(); // высота шапки зависит от того, есть ли рисунок
   return acts;

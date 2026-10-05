@@ -638,8 +638,8 @@ def mark_payload(brand: dict, find_file) -> dict | None:
     if snout and cell(snout.get("row"), 0, rows) is not None and cell(snout.get("col"), 0, cols) is not None:
         if isinstance(snout.get("calm"), str) and isinstance(snout.get("sniff"), str):
             out["snout"] = {"row": snout["row"], "col": snout["col"], "calm": snout["calm"], "sniff": snout["sniff"]}
-    # Кегль знака: по умолчанию 4 px — подробный рисунок (десятки колонок) в шапку; `word` — кеглем
-    # слова, для маленького знака в несколько строк (как кот морага рядом с надписью).
+    # Кегль знака: по умолчанию 4 px — подробный рисунок (десятки колонок) в шапку; `word` — по
+    # высоте слова с подписью, для маленького знака в несколько строк (как кот морага у надписи).
     if brand.get("mark_size") == "word":
         out["size"] = "word"
     return out
