@@ -28,7 +28,7 @@ export function showMark(brand = {}) {
   if (!markHost || !wordHost) return null;
   stopIdle();
   const art = brand.mark && Array.isArray(brand.mark.lines) ? brand.mark : null;
-  const lines = boxfont.render(brand.wordmark || DEFAULT_WORDMARK);
+  const lines = boxfont.render(brand.wordmark || DEFAULT_WORDMARK, { weight: brand.wordmark_weight });
   // `size: word` — маленький рисунок в несколько строк рядом со словом: в поле знака клетки
   // считаются как у слова (без пересчёта 11/4), а кегль подгоняется по высоте слова (ниже).
   const wordSize = art?.size === "word";

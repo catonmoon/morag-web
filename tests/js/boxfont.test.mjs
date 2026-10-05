@@ -43,3 +43,12 @@ console.log("boxfont: ок");
   const { spaceCols } = await import("../../web/js/ui/boxfont.js");
   assert.equal(spaceCols(), 3);
 }
+
+// Тонкое начертание: те же буквы одинарными линиями, ширина та же, двойных литер не остаётся.
+{
+  const { render } = await import("../../web/js/ui/boxfont.js");
+  const heavy = render("ML CLASSIC"), light = render("ML CLASSIC", { weight: "light" });
+  assert.deepEqual(light.map((r) => [...r].length), heavy.map((r) => [...r].length));
+  assert.ok(!/[═║╔╗╚╝╦╩╠╣╬]/.test(light.join("")), "в тонком наборе нет двойных линий");
+  assert.deepEqual(render("A", { weight: "light" }), ["┌─┐", "├─┤", "┴ ┴"]);
+}

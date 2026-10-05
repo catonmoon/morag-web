@@ -593,7 +593,7 @@ def _halo_fields(raw: dict) -> dict:
 # Что пространство наследует от витрины, если не задало своё: картинка обложки, знак (рисунок
 # и клетки мордочки) и слово в шапке. Один рисунок на весь сайт, копия у каждого пространства —
 # лишнее место, где он разойдётся.
-INHERITED_BRAND = ("cover", "mark", "mark_face", "mark_size", "wordmark")
+INHERITED_BRAND = ("cover", "mark", "mark_face", "mark_size", "wordmark", "wordmark_weight")
 MARK_MAX_ROWS, MARK_MAX_COLS = 40, 160
 
 
@@ -847,6 +847,7 @@ class Corpus:
                 "cover": self.brand.get("cover"),
                 "mark": mark_payload(self.brand, self.brand_file),
                 "wordmark": str(self.brand.get("wordmark") or ""),
+                "wordmark_weight": str(self.brand.get("wordmark_weight") or ""),
                 "links": [
                     {"kind": l.get("kind"), "label": l.get("label"), "url": l.get("url")}
                     for l in (self.brand.get("links") or [])
@@ -931,6 +932,7 @@ class Hub:
             "about": self.brand.get("about", ""),
             "mark": mark_payload(self.brand, lambda name: _inside(self.brand_dir, name)),
             "wordmark": str(self.brand.get("wordmark") or ""),
+                "wordmark_weight": str(self.brand.get("wordmark_weight") or ""),
             "theme": {
                 "mood": self.theme.get("mood"),
                 "tokens": self.theme.get("tokens", {}),

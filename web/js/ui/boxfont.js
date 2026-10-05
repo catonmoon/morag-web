@@ -47,15 +47,21 @@ const G = {
 
 export const GLYPHS = G;
 
+// Тонкое начертание (`brand.wordmark_weight: light`, владелец 05.10: «более тонким шрифтом»):
+// те же буквы одинарными линиями — каждая двойная рамочная литера заменяется своей тонкой парой,
+// ширина и раскладка не меняются.
+const LIGHT = { "╔": "┌", "╗": "┐", "╚": "└", "╝": "┘", "═": "─", "║": "│", "╦": "┬", "╩": "┴",
+                "╠": "├", "╣": "┤", "╬": "┼" };
+
 /** Три строки рамочного набора для слова. Регистр не важен, незнакомый символ — пробел. */
-export function render(text) {
+export function render(text, { weight = "" } = {}) {
   const rows = ["", "", ""];
   const chars = [...String(text || "").toUpperCase()];
   chars.forEach((ch, k) => {
     const g = G[ch] || G[" "];
     for (let r = 0; r < 3; r++) rows[r] += (k ? " " : "") + g[r];
   });
-  return rows;
+  return weight === "light" ? rows.map((row) => [...row].map((c) => LIGHT[c] || c).join("")) : rows;
 }
 
 /** Ширина набора в клетках — для поля знака. */
