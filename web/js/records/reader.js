@@ -462,6 +462,7 @@ export async function renderReader(id, sec = 0, {
     if (src && s.url === src) {
       // Любой владелец, не только читалка: карточка-момент из панели (`mN`) играет эту же
       // запись тем же элементом. Без владельца — это `prime`: подготовлена, но не звучала.
+      // Чтобы всплывший кадр не лёг на саму карточку — `showCard` ниже.
       const запускали = s.owner != null;
       // ⚠️ На паузе кадр НЕ отклеиваем в тот же миг — «поставили и поставили паузу». Но и
       // держать намертво нельзя: он обязан уехать, как только человек снова листает. Помним,
@@ -473,6 +474,11 @@ export async function renderReader(id, sec = 0, {
     // ним по `--kar-top`. Раньше без `src` выходили сразу, и имя висело по дефолту стилей —
     // под пультом; пока оно рисовалось НИЖЕ пульта, это не было видно.
     screen.classList.toggle("live", живой);
+    // Играет цитата из панели вопросов (владелец не читалка) — у её карточки свой плеер, и пульт
+    // читалки сверху был бы вторым управлением того же звука. Пульт тогда не липнет и уезжает
+    // со страницей; под шапкой — один кадр (владелец, 05.10).
+    const вольный = живой && s.owner !== playOpts.owner;
+    dock.classList.toggle("loose", вольный);
     // Пульт липнет ПОД кадром, а не на его место: два липких блока на одной высоте наложились
     // бы друг на друга. Высоту кадра отдаём стилям числом — в CSS её не вычислить.
     // ⚠️ ВПЛОТНУЮ, без зазора: в зазор просвечивал проезжающий текст, и между кадром и пультом
@@ -480,7 +486,8 @@ export async function renderReader(id, sec = 0, {
     const подКадром = живой ? TOPBAR() + screen.getBoundingClientRect().height : TOPBAR();
     dock.style.setProperty("--dock-top", `${Math.round(подКадром)}px`);
     // Липкое имя говорящего встаёт под управлением, а его высота меняется вместе с кадром.
-    body.style.setProperty("--kar-top", `${Math.round(подКадром + dock.getBoundingClientRect().height)}px`);
+    body.style.setProperty("--kar-top",
+      `${Math.round(подКадром + (вольный ? 0 : dock.getBoundingClientRect().height))}px`);
     markStuck();
   };
   addEventListener("scroll", place, { passive: true });
@@ -514,7 +521,10 @@ export async function renderReader(id, sec = 0, {
       who.classList.remove("pushed");
     }
     const dockBox = dock.getBoundingClientRect();
-    const karTop = dockBox.bottom;
+    // Пульт отпущен (`loose`) — имена висят прямо под кадром, по `--kar-top`, а не под пультом.
+    const karTop = dock.classList.contains("loose")
+      ? parseFloat(body.style.getPropertyValue("--kar-top")) || dockBox.bottom
+      : dockBox.bottom;
     // ⚠️ Хвост пульта горит, только когда пульт ПРИЛИП. В покое он стоит на своём месте в потоке,
     // под ним ничего не проезжает — а градиент висел всегда, и панель вопросов, стоящая сразу под
     // пультом, лежала в нём без всякой прокрутки: «кнопки затеняются, видно плохо» (владелец,
@@ -561,6 +571,30 @@ export async function renderReader(id, sec = 0, {
     // анимируется вовсе — `scrollBy({behavior:"smooth"})` не сдвигает страницу ни на пиксель,
     // тогда как мгновенная работает. Полагаться на неё значит не подвинуть текст совсем.
     scrollBy({ top: верх - край });
+  };
+
+  /** Заиграла цитата из панели вопросов — поставить её карточку ровно ПОД всплывший кадр.
+   *
+   * Кадр липнет под шапкой, а панель стоит ниже: без сдвига он ложился на открытую цитату и
+   * закрывал её (владелец, 05.10: «видео тоже было, но ровно НАД карточкой и не перекрывало
+   * её»). Пульт читалки при этом отпущен (`loose` в `place`) — у карточки свой плеер. Правило
+   * то же, что у слова (`nudge`): не перекрыто — не двигаем; перекрыто — верх карточки встаёт
+   * сразу под кадром.
+   */
+  const showCard = () => {
+    // Играющая карточка — та, у которой горит кнопка пуска (`moments.js`). Не по id: у каждого
+    // хода панели свои `m-1`, `m-2`… — номера цитат повторяются.
+    const card = [...(qa?.node.querySelectorAll(".moment") || [])].find((c) => c.querySelector(".playing"));
+    if (!card) return;
+    place(); // кадр уже всплыл — меряем с ним
+    // Край — где низ пульта будет, когда он ПРИЛИПНЕТ (`--dock-top` + высота), а не где он сейчас:
+    // карточка ниже пульта, и пока страница не сдвинута, пульт может стоять в потоке выше
+    // своего липкого места — мерка по нему недодвигала карточку (замер 05.10: 47 px под пультом).
+    // Пульт при играющей цитате отпущен (`loose`) — тогда низ стопки это низ кадра (`--dock-top`).
+    const липкийВерх = parseFloat(dock.style.getPropertyValue("--dock-top")) || TOPBAR();
+    const край = липкийВерх + (dock.classList.contains("loose") ? 0 : dock.getBoundingClientRect().height) + 6;
+    const верх = card.getBoundingClientRect().top;
+    if (верх < край) scrollBy({ top: верх - край }); // мгновенно: плавную не всегда видно (см. nudge)
   };
 
   // Перехватываем звук — забираем и кадр: до этого он мог остаться на чужой странице.
@@ -1021,6 +1055,7 @@ export async function renderReader(id, sec = 0, {
   let revealTimers = null; // повторные наводки на место из ссылки — снимаем при уходе
   let wasPlaying = false;
   let wasBtnPlaying = null;
+  let игралаКарточка = null; // владелец-карточка, под которую уже двигали страницу
   let lastWidth = -1;
   let lastClock = "";
   let lastTotal = "";
@@ -1170,6 +1205,17 @@ export async function renderReader(id, sec = 0, {
       playBtn.innerHTML = wasBtnPlaying ? PAUSE : PLAY;
     }
     playBtn.classList.toggle("playing", sounding && s.playing);
+    // Заиграла (или сменилась) цитата из панели — на следующем кадре: подписчик карточки мог ещё
+    // не зажечь свою кнопку, а кадр — не всплыть.
+    const карточка = sounding && s.playing && typeof s.owner === "string" && s.owner.startsWith("m")
+      ? s.owner : null;
+    if (карточка && карточка !== игралаКарточка) {
+      requestAnimationFrame(showCard);
+      // И ещё раз чуть позже: кадр встаёт во весь рост, когда видео отдаст размеры, — пульт
+      // уезжает ниже, и карточка снова оказалась бы под ним. Не перекрыта — второй раз не двигает.
+      setTimeout(showCard, 400);
+    }
+    игралаКарточка = карточка;
     speed.textContent = rateLabel(s.rate);
     full.hidden = !s.picture;
     full.innerHTML = s.full ? SHRINK : EXPAND;
