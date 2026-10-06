@@ -51,12 +51,19 @@
         <label>Рубрика<select id="event"></select></label>
       </div>
       <details id="more">
-        <summary>Подробнее — докладчики, аннотация, метки, слайды</summary>
+        <summary>Подробнее — докладчики, аннотация, метки, материалы, обсуждение</summary>
         <label>Докладчики<input id="speakers" placeholder="Имя Фамилия, Имя Фамилия"></label>
         <label>О чём запись<textarea id="summary" placeholder="Два-три предложения. Не напишете — сервер сочинит сам"></textarea></label>
         <div class="row">
           <label>Метки<input id="tags" placeholder="kafka, streams"></label>
-          <label>Слайды PDF<input id="slides" placeholder="путь к файлу"></label>
+          <label>Ссылка на обсуждение<input id="discussion" placeholder="https://… тред в мессенджере"></label>
+        </div>
+        <!-- Материалы: презентации, PDF, ноутбуки — уедут вместе с записью и появятся на её
+             странице. Перетащите в окно или выберите кнопкой. -->
+        <div class="materials">
+          <div class="materials-head">Материалы
+            <button type="button" id="add-materials" class="ghost">Добавить файлы…</button></div>
+          <ul id="materials"></ul>
         </div>
       </details>
       <div class="line">

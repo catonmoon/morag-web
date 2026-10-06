@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -108,19 +109,27 @@ def run(port: int = 8099) -> int:
             paths = self._paths_(sender)
             if not paths:
                 return False
-            js = f"window.dropVideo && window.dropVideo({paths[0]!r})".replace("'", '"')
-            self.evaluateJavaScript_completionHandler_(js, None)
+            # Видео — в окошко записи, остальное — в материалы (презентации, PDF, ноутбуки).
+            videos = [p for p in paths if Path(p).suffix.lower().lstrip(".") in upload_ui.upload.VIDEO_EXT]
+            others = [p for p in paths if p not in videos]
+            if videos:
+                js = f"window.dropVideo && window.dropVideo({json.dumps(videos[0])})"
+                self.evaluateJavaScript_completionHandler_(js, None)
+            if others:
+                js = f"window.dropMaterials && window.dropMaterials({json.dumps(others)})"
+                self.evaluateJavaScript_completionHandler_(js, None)
             return True
 
         def _paths_(self, sender):  # noqa: N802
-            """Пути перетаскиваемых видеофайлов (чужие расширения не принимаем вовсе)."""
+            """Пути перетаскиваемых файлов: видео и материалы (чужие расширения не принимаем)."""
             out = []
             for item in sender.draggingPasteboard().pasteboardItems() or []:
                 raw = item.stringForType_(NSPasteboardTypeFileURL)
                 if not raw:
                     continue
                 path = NSURL.URLWithString_(raw).path()
-                if path and Path(path).suffix.lower().lstrip(".") in upload_ui.upload.VIDEO_EXT:
+                ext = Path(path).suffix.lower().lstrip(".") if path else ""
+                if ext in upload_ui.upload.VIDEO_EXT or ext in upload_ui.upload.attach_names.DEFAULT_EXT:
                     out.append(str(path))
             return out
 

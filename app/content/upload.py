@@ -43,6 +43,8 @@ sys.path.insert(0, str(REPO / "tools"))
 import spaces  # noqa: E402
 from make_record import slugify  # noqa: E402
 
+from . import attachments  # noqa: E402
+
 SPEAKER_RE = re.compile(r"\bSpeaker_(\d+)\b")
 ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9-]{1,120}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -53,6 +55,10 @@ FILES = ("artifact.json", "voices.json", "record.slides.json", "record.refs.json
          "slides.zip", "slides.pdf") + tuple(f"video.{ext}" for ext in VIDEO_EXT)
 # Сайдкары экрана — переезжают в каталог записи как есть; в `refs` есть метки голосов — их тоже сдвигаем.
 SIDECARS = ("record.slides.json", "record.refs.json", "record.annotations.json")
+# Материалы записи (презентации, ноутбуки…) едут в пакете под именем `attach-<имя>`: имя файла
+# приходит из URL, поэтому оно проверяется тем же белым списком, что и приложенное с сайта, и
+# при приёме ложится в `files/` записи через `attachments.add`.
+ATTACH = "attach-"
 
 
 class Refused(Exception):
@@ -78,6 +84,9 @@ class Manifest:
     # различает (имя файла бывает осмысленным), а доразметка (`tools/auto_meta.py`) заменяет
     # только служебные заголовки — поэтому про источник говорит тот, кто загружает.
     title_auto: bool = False
+    # Ссылка на обсуждение записи (тред в мессенджере): ложится в `head.discussion` меты — туда,
+    # где её не тронет пересборка меты.
+    discussion: str = ""
 
     def to_json(self) -> dict:
         return {k: v for k, v in self.__dict__.items()}
@@ -118,7 +127,7 @@ def forced_tags(family: Path) -> set[str]:
             if rule.get("upload") is False and (rule.get("match") or {}).get("tag")}
 
 
-def validate(raw: dict, family: Path) -> Manifest:
+def validate(raw: dict, family: Path, *, link_hosts: list[str] | tuple[str, ...] = ()) -> Manifest:
     """Проверить манифест и вывести id. Что не сходится — `Refused` с причиной, а не 500."""
     title = str(raw.get("title") or "").strip()
     date = str(raw.get("date") or "").strip()
@@ -142,16 +151,27 @@ def validate(raw: dict, family: Path) -> Manifest:
     ext = video.rsplit(".", 1)[-1].lower() if "." in video else ""
     if ext not in VIDEO_EXT:
         raise Refused(f"видео — файл с расширением {', '.join(VIDEO_EXT)}")
+    try:
+        discussion = attachments.check_link(str(raw.get("discussion") or ""), link_hosts)
+    except attachments.Refused as error:
+        raise Refused(str(error)) from error
     rid = record_id(date, title)
     if not ID_RE.match(rid):
         raise Refused("из названия не вышло адреса записи — напишите его латиницей или кириллицей")
     return Manifest(title=title, date=date, event=event, tags=tags, summary=summary,
                     speakers=speakers, video=f"video.{ext}", record_id=rid,
-                    title_auto=bool(raw.get("title_auto")))
+                    title_auto=bool(raw.get("title_auto")), discussion=discussion)
 
 
 def accept_name(name: str) -> bool:
-    return name in FILES
+    if name in FILES:
+        return True
+    if not name.startswith(ATTACH):
+        return False
+    try:
+        return attachments.safe_name(name[len(ATTACH):]) == name[len(ATTACH):]
+    except attachments.Refused:
+        return False
 
 
 def remap_speakers(text: str, mapping: dict[str, str], default: str = "") -> str:
@@ -374,6 +394,21 @@ def llm_env_of(state) -> dict[str, str]:
     return {"ASR_LLM_BASE_URL": cfg.topic.base_url, "ASR_LLM_MODEL": cfg.topic.model, "OR_KEY": key}
 
 
+def _list_once(record_dir: Path, item: dict) -> None:
+    """Внести в материалы файл, уже лежащий в каталоге записи (слайды пакета), — один раз:
+    повторный приём после сбоя не должен задвоить строку."""
+    path = record_dir / "record.meta.json"
+    meta = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    listed = list(meta.get(attachments.KEY) or [])
+    if any(i.get("file") == item["file"] for i in listed):
+        return
+    item = {**item, "at": time.strftime("%Y-%m-%d")}
+    if (record_dir / item["file"]).is_file():
+        item["size"] = (record_dir / item["file"]).stat().st_size
+    meta[attachments.KEY] = listed + [item]
+    path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 async def accept(staging: Staging, rid: str, *, family: Path, cfg, root: Path,
                  llm_env: dict[str, str] | None = None, voices=None) -> Path:
     """Стейджинг → запись в корпусе. Порядок важен и записан:
@@ -453,6 +488,7 @@ async def accept(staging: Staging, rid: str, *, family: Path, cfg, root: Path,
             "speakers": [{"name": n, "from": "upload"} for n in m.speakers],
             "summary": m.summary,
             "links": {},
+            **({"head": {"discussion": m.discussion}} if m.discussion else {}),
             "sources": {"upload": {"by": m.uploader, "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                                    "title_from": "file" if m.title_auto else "author"}},
         }
@@ -477,6 +513,13 @@ async def accept(staging: Staging, rid: str, *, family: Path, cfg, root: Path,
                 shutil.move(str(d / name), str(record_dir / name))
         if (d / "slides.pdf").is_file():
             shutil.move(str(d / "slides.pdf"), str(record_dir / "slides.pdf"))
+            _list_once(record_dir, {"file": "slides.pdf", "title": "Слайды", "from": "upload",
+                                    "by": m.uploader})
+        for part in sorted(d.glob(f"{ATTACH}*")):
+            if part.name.endswith(".part"):
+                continue
+            attachments.add(record_dir, part.name[len(ATTACH):], part, by=m.uploader,
+                            source_from="upload")
         if (d / "slides.zip").is_file():
             frames = record_dir / "slides"
             frames.mkdir(exist_ok=True)

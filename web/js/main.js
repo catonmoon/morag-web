@@ -154,6 +154,7 @@ const router = createRouter(
         onOpenRecord: (recordId, at) => router.go({ view: "reader", id: recordId, sec: at }),
         // Моменты экрана: лента под видео или метки на полосе плеера (site.yml `reader.frames`).
         frames: site?.reader?.frames || "strip",
+        discussionLabel: site?.reader?.discussion_label || "обсуждение",
       }).catch(fail),
   },
   { getSlug: () => site?.slug || null }

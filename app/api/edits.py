@@ -12,11 +12,13 @@
 from __future__ import annotations
 
 import logging
+import uuid
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .. import config
+from ..content import attachments
 from ..content import fields as record_fields
 from ..content import upload as core
 from ..content.edits import Refused, Stale
@@ -55,6 +57,8 @@ class Fields(BaseModel):
     topics: list[str] | None = Field(default=None, max_length=40)
     speakers: list[str] | None = Field(default=None, max_length=40)
     participants: list[str] | None = Field(default=None, max_length=60)
+    # Ссылка на обсуждение записи (тред в мессенджере). Рука человека побеждает ссылку из поста.
+    discussion: str | None = Field(default=None, max_length=1000)
 
 
 class Promote(BaseModel):
@@ -124,7 +128,8 @@ async def fields(request: Request, record_id: str, payload: Fields) -> dict:
     try:
         result = record_fields.save(record_dir, payload.model_dump(exclude_unset=True),
                                     why=request.app.state.auth.why_line(request), family=family,
-                                    events=core.events_of(family))
+                                    events=core.events_of(family),
+                                    link_hosts=request.app.state.cfg.editing.discussion_hosts)
         moved = record_fields.move(record_dir, result["move"]) if result["move"] else None
     except record_fields.Refused as error:
         raise HTTPException(400, str(error))
@@ -171,3 +176,60 @@ async def promote(request: Request, payload: Promote) -> dict:
     log.info("правило «%s» → «%s», записей %d", payload.was, payload.now, len(touched))
     return {**result, "records": touched, "queued": queued,
             "queue": request.app.state.rebuilder.status()}
+
+
+MB = 1024 ** 2
+
+
+@router.put("/records/{record_id}/files/{name}")
+async def attach(request: Request, record_id: str, name: str) -> dict:
+    """Приложить материал: тело запроса — сам файл, имя — в адресе (как у загрузки записи:
+    потоком на диск, без multipart). Право `edit` — материал касается одной записи, как правка
+    реплики. Запись НЕ пересобирается: список живёт в мете, а мета в шапку не идёт."""
+    _guard(request)
+    record_dir = _dir(request, record_id)
+    cfg = request.app.state.cfg.editing
+    try:
+        attachments.safe_name(name, cfg.attachments_ext)
+    except attachments.Refused as error:
+        raise HTTPException(error.status, str(error))
+    limit = int(cfg.attachments_max_mb * MB)
+    if int(request.headers.get("content-length") or 0) > limit:
+        raise HTTPException(413, f"файл больше {cfg.attachments_max_mb:g} МБ")
+    part = record_dir / f".attach-{uuid.uuid4().hex}.part"
+    written = 0
+    try:
+        with part.open("wb") as out:
+            async for chunk in request.stream():
+                written += len(chunk)
+                if written > limit:
+                    raise HTTPException(413, f"файл больше {cfg.attachments_max_mb:g} МБ")
+                out.write(chunk)
+        if not written:
+            raise HTTPException(400, "файл пустой")
+        user = request.app.state.auth.user_of(request)
+        item = attachments.add(record_dir, name, part, allowed=cfg.attachments_ext,
+                               by=f"{user.name} ({user.login})" if user else "")
+    except attachments.Refused as error:
+        raise HTTPException(error.status, str(error))
+    finally:
+        part.unlink(missing_ok=True)
+    log.info("материал записи %s: %s, %d байт", record_id, item["file"], written)
+    return {"file": item, "files": attachments.items(record_dir, cfg.attachments_ext)}
+
+
+@router.delete("/records/{record_id}/files/{name:path}")
+async def detach(request: Request, record_id: str, name: str) -> dict:
+    """Убрать материал: пометка в списке, файл остаётся на диске (почему — `attachments`)."""
+    _guard(request)
+    record_dir = _dir(request, record_id)
+    cfg = request.app.state.cfg.editing
+    try:
+        hit = attachments.remove(record_dir, name,
+                                 by=request.app.state.auth.why_line(request, "убрано"))
+    except attachments.Refused as error:
+        raise HTTPException(error.status, str(error))
+    if not hit:
+        raise HTTPException(404, "нет такого материала")
+    log.info("материал записи %s убран: %s", record_id, name)
+    return {"files": attachments.items(record_dir, cfg.attachments_ext)}

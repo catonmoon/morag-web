@@ -73,6 +73,8 @@ async def options(request: Request) -> dict:
            "cookie": app_cfg.auth.cookie_name if app_cfg.auth.enabled else ""}
     return {"events": core.events_of(staging.family, for_upload=True), "video_ext": list(core.VIDEO_EXT),
             "max_gb": cfg.max_gb, "files": list(core.FILES), "llm": llm,
+            # Материалы: пакетом под `attach-<имя>`, расширения — из белого списка правки.
+            "attach_prefix": core.ATTACH, "attach_ext": list(app_cfg.editing.attachments_ext),
             "tags": _tags(request)}
 
 
@@ -99,7 +101,8 @@ async def create(request: Request) -> dict:
     if not isinstance(raw, dict):
         raise HTTPException(400, "манифест — объект")
     try:
-        manifest = core.validate(raw, staging.family)
+        manifest = core.validate(raw, staging.family,
+                                 link_hosts=request.app.state.cfg.editing.discussion_hosts)
         user = request.app.state.auth.user_of(request)
         manifest.uploader = f"{user.name} ({user.login})" if user else "local"
         staging.create(manifest)
@@ -116,7 +119,8 @@ async def upload(request: Request, rid: str, name: str) -> dict:
     staging = _staging(request)
     cfg = request.app.state.cfg.upload
     if not core.accept_name(name):
-        raise HTTPException(400, f"файл {name} не из пакета; принимаются: {', '.join(core.FILES)}")
+        raise HTTPException(400, f"файл {name} не из пакета; принимаются: {', '.join(core.FILES)} "
+                                 f"и материалы {core.ATTACH}<имя>")
     try:
         manifest = staging.manifest(rid)
     except core.Refused as error:

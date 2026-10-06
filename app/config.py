@@ -16,6 +16,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
+from .content.attachments import DEFAULT_EXT as DEFAULT_ATTACH_EXT
 from .content.records import RecordIndex
 
 # Имя продукта — ОДНО место: заголовок приложения, префикс переменных окружения, имя логгера.
@@ -140,6 +141,13 @@ class EditingCfg(BaseModel):
     # связала бы их навсегда. `{record_dir}` подставляется.
     rebuild: list[str] = Field(default_factory=lambda: [
         sys.executable, "tools/make_record.py", "{record_dir}"])
+    # Материалы записи (`app/content/attachments.py`): что принимаем и сколько. Тот же белый
+    # список отдаёт файлы — расширение, которого в нём нет, не скачивается, даже если лежит.
+    attachments_ext: list[str] = Field(default_factory=lambda: list(DEFAULT_ATTACH_EXT))
+    attachments_max_mb: float = 200
+    # Ссылка на обсуждение: с каких хостов принимать. Пусто — любой http(s). Адрес мессенджера
+    # корпуса — инфраструктура, его место в конфиге корпуса, а не здесь.
+    discussion_hosts: list[str] = Field(default_factory=list)
 
 
 class VoicesCfg(BaseModel):
@@ -752,6 +760,8 @@ class Corpus:
         self.reader: dict = {
             "frames": "timeline" if reader.get("frames") == "timeline" else "strip",
             "frames_text": bool(reader.get("frames_text", False)),
+            # Подпись ссылки на обсуждение в шапке записи: название мессенджера — дело корпуса.
+            "discussion_label": str(reader.get("discussion_label") or "обсуждение"),
         }
         # Адрес медиа: сначала своё (у пространства бывает свой архив), потом общий из
         # app/config.yml. В `site.yml` его обычно нет — это инфраструктура, а файл в git.

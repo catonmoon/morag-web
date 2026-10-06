@@ -828,7 +828,8 @@ def build_one(args, source: Path, changed_out: list | None = None) -> int:
         "title": args.title or hand.get("title") or old_head.get("title") or artifact.stem,
         # Дата ВЫСТУПЛЕНИЯ из календаря выступлений, если строка нашлась (решение владельца
         # 12.09): дата поста отстаёт на дни, а бывает и на месяцы. id и адрес не меняются.
-        "date": args.date or talk.get("date") or old_head.get("date"),
+        # Рука (`head.date`, правка с сайта) старше календаря: `talk` пересобирается из него.
+        "date": args.date or hand.get("date") or talk.get("date") or old_head.get("date"),
         "event": args.event or hand.get("event") or old_head.get("event"),
         # Ветка = первый уровень раскладки на диске. Пишем её ПОЛЕМ, хотя она уже есть в пути,
         # и это не дубль по недосмотру: путь входит только в dense-вектор, а АГЕНТ его не видит
@@ -853,9 +854,10 @@ def build_one(args, source: Path, changed_out: list | None = None) -> int:
         "summary": args.summary or hand.get("summary") or old_head.get("summary"),
         # Ссылка на исходный пост: расшифровка не заменяет обсуждение под ним.
         "post": args.post or hand.get("post") or old_head.get("post"),
-        # Обсуждение в мессенджере — из меты (полный текст поста и календарь), не из старой шапки:
-        # мета пересобирается, а шапка выводится из неё.
-        "discussion": ((meta_json.get("links") or {}).get("discussion")) or old_head.get("discussion"),
+        # Обсуждение в мессенджере: рука с сайта (`head.discussion`; пустая строка — «снята», и
+        # ссылка из поста НЕ возвращается), потом мета (пост и календарь), потом старая шапка.
+        "discussion": ((hand.get("discussion") or None) if "discussion" in hand else
+                       ((meta_json.get("links") or {}).get("discussion")) or old_head.get("discussion")),
         "slides": old_head.get("slides"),
         "tags": ([t.strip() for t in args.tags.split(",")] if args.tags
                  else hand.get("tags") or old_head.get("tags")),

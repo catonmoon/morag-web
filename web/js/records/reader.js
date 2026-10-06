@@ -22,7 +22,7 @@ import * as player from "../ui/player.js";
 import { fitBox } from "../ui/crop.js";
 import { cardLeft, markAt, marksOf, pickMark } from "./marks.js";
 import { coverUrl, getFrames, getRecords, getWords, transcriptUrl, slidesUrl, mediaUrl,
-         saveEdits, saveFields, promoteFix, getTokens, getVoicesQueue, getVoice,
+         getFiles, fileUrl, attachFile, detachFile, saveEdits, saveFields, promoteFix, getTokens, getVoicesQueue, getVoice,
          renameVoice } from "../api.js";
 
 const PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
@@ -95,6 +95,8 @@ export async function renderReader(id, sec = 0, {
   // Моменты экрана: `strip` — лента кадров под видео, `timeline` — метки на полосе плеера с
   // карточкой при наведении (site.yml `reader.frames`, владелец 04.10).
   frames: framesMode = "strip",
+  // Подпись ссылки на обсуждение — название мессенджера корпуса (site.yml `reader.discussion_label`).
+  discussionLabel = "обсуждение",
 } = {}) {
   const root = $("#reader");
 
@@ -153,7 +155,7 @@ export async function renderReader(id, sec = 0, {
         : null,
       meta.discussion ? el("span", { class: "dot" }) : null,
       meta.discussion
-        ? el("a", { class: "rd-post", href: meta.discussion, target: "_blank", rel: "noopener", text: "обсуждение" })
+        ? el("a", { class: "rd-post", href: meta.discussion, target: "_blank", rel: "noopener", text: discussionLabel })
         : null
     ),
     // Люди — по ролям, а не общим списком: кто выступал и кто спрашивал — разные вопросы.
@@ -280,6 +282,8 @@ export async function renderReader(id, sec = 0, {
     ["speakers", "Выступали", "list"],
     ["participants", "Участвовали", "list"],
     ["summary", "О чём запись", "area"],
+    // Пустое поле — «снять ссылку»: ссылка из поста после этого не возвращается.
+    ["discussion", `Ссылка: ${discussionLabel}`, "text"],
   ];
   const fieldInputs = new Map();
   const fieldsMsg = el("p", { class: "rd-fields-msg" });
@@ -309,6 +313,95 @@ export async function renderReader(id, sec = 0, {
   // и ссылка на ещё не объявленную `const` роняла ВСЮ читалку — страница говорила «не удалось
   // загрузить данные» (живьём на сервере 25.09).
   if (fieldsForm) head.append(fieldsForm);
+
+  // --- материалы записи -------------------------------------------------
+  //
+  // Презентации, PDF, ноутбуки — список в мете записи (не в шапке: материал поиску не нужен, а
+  // поле шапки стоило бы переиндексации). Видны всем; в режиме правки — «приложить» и «убрать».
+  // ⚠️ «Убрать» — пометка на сервере, файл остаётся на диске: доставка между машинами умеет
+  // только добавлять, и удалённый файл вернулся бы.
+  let filesList = [];
+  const filesBox = el("div", { class: "rd-files", hidden: "" });
+  const filesMsg = el("span", { class: "rd-fields-msg" });
+  const filesPick = editing ? el("input", { type: "file", multiple: "", hidden: "" }) : null;
+  const filesAdd = editing
+    ? el("button", { class: "dl-btn rd-files-add", text: "Приложить файл", title: "Презентация, PDF, ноутбук… (или перетащите сюда)" })
+    : null;
+  filesAdd?.addEventListener("click", () => filesPick.click());
+  filesPick?.addEventListener("change", () => {
+    attachMany([...filesPick.files]);
+    filesPick.value = "";
+  });
+  filesBox.addEventListener("dragover", (e) => {
+    if (!editMode) return;
+    e.preventDefault();
+    filesBox.classList.add("drop");
+  });
+  filesBox.addEventListener("dragleave", () => filesBox.classList.remove("drop"));
+  filesBox.addEventListener("drop", (e) => {
+    filesBox.classList.remove("drop");
+    if (!editMode) return;
+    e.preventDefault();
+    attachMany([...(e.dataTransfer?.files || [])]);
+  });
+
+  const sizeOf = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} МБ` : `${Math.max(1, Math.round(n / 1024))} КБ`);
+
+  function renderFiles() {
+    const rows = filesList.map((f) =>
+      el("li", { class: "rd-file" },
+        el("span", { class: "rd-file-ext", text: f.ext }),
+        el("a", { href: fileUrl(meta.id, f.file), target: "_blank", rel: "noopener", text: f.title }),
+        el("span", { class: "rd-file-size", text: sizeOf(f.size) }),
+        editMode
+          ? el("button", { class: "rd-file-drop", text: "убрать", title: "Убрать из материалов",
+                           onclick: () => detach(f) })
+          : null));
+    // ⚠️ `replaceChildren`, в отличие от `el`, пустые места не пропускает: `null` стал бы текстом.
+    filesBox.replaceChildren(...[
+      el("div", { class: "rd-files-title", text: "Материалы" }),
+      rows.length ? el("ul", { class: "rd-files-list" }, ...rows) : null,
+      editMode ? el("div", { class: "rd-fields-line" }, filesAdd, filesPick, filesMsg) : null,
+    ].filter(Boolean));
+    filesBox.hidden = !rows.length && !editMode;
+    // Старая кнопка слайдов не нужна, когда есть список: колода в нём же.
+    if (slides) slides.hidden = rows.length > 0;
+  }
+
+  async function loadFiles() {
+    try {
+      filesList = (await getFiles(meta.id)).files || [];
+    } catch {
+      filesList = [];
+    }
+    renderFiles();
+  }
+
+  async function attachMany(list) {
+    for (const file of list) {
+      filesMsg.textContent = `Загружаю ${file.name}…`;
+      try {
+        filesList = (await attachFile(meta.id, file)).files || filesList;
+        renderFiles();
+        filesMsg.textContent = `Приложено: ${file.name}`;
+      } catch (error) {
+        filesMsg.textContent = `Не приложилось ${file.name}: ${error.message}`;
+        return;
+      }
+    }
+  }
+
+  async function detach(f) {
+    try {
+      filesList = (await detachFile(meta.id, f.file)).files || [];
+      renderFiles();
+      filesMsg.textContent = `Убрано: ${f.title}`;
+    } catch (error) {
+      filesMsg.textContent = `Не убралось: ${error.message}`;
+    }
+  }
+
+  head.insertBefore(filesBox, fieldsForm || null);
 
   /** Что человек реально тронул: ключи с изменившимся значением. */
   function fieldsPatch() {
@@ -918,6 +1011,8 @@ export async function renderReader(id, sec = 0, {
   }
 
   let editMode = false;
+  // Материалы — только после объявления `editMode`: их отрисовка его читает (TDZ).
+  loadFiles();
 
   // Карандаш виден вне режима; в режиме на его месте «ОК» и «Отменить».
   function showEditControls(on) {
@@ -931,6 +1026,7 @@ export async function renderReader(id, sec = 0, {
     editMode = true;
     showEditControls(true);
     fieldsForm?.removeAttribute("hidden");
+    renderFiles();
     karaoke?.setEditing(true);
     say("Режим правки: щёлкните в текст и правьте прямо в нём — правка абзаца запоминается, когда уходите из него (Esc — вернуть абзац). «ОК» сохранит всё, «Отменить» вернёт как было.");
   }
@@ -945,6 +1041,7 @@ export async function renderReader(id, sec = 0, {
     editMode = false;
     showEditControls(false);
     fieldsForm?.setAttribute("hidden", "");
+    renderFiles();
     if (!save) {
       // Откат: абзацам возвращается исходный текст той же перестройкой, что и правка, —
       // «было» в черновике всегда исходное, даже если абзац правили дважды.

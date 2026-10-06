@@ -26,11 +26,12 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "tools"))
 import spaces  # noqa: E402
 
+from . import attachments
 from .frontmatter import read_frontmatter
 
 DATE = "date"
 # Куда какое поле ложится в мете. Порядок ключей здесь — порядок разделов формы на странице.
-HEAD_KEYS = ("title", "event", "tags", "summary")
+HEAD_KEYS = ("title", "event", "tags", "summary", "discussion")
 LABEL_KEYS = ("category", "topics")
 ROLE_KEYS = ("speakers", "participants")
 
@@ -63,7 +64,7 @@ def _clean(value, limit: int = 300):
 
 
 def save(record_dir: Path, fields: dict, *, why: str, family: Path,
-         events: list[str] | None = None) -> dict:
+         events: list[str] | None = None, link_hosts: list[str] | None = None) -> dict:
     """Записать поля в мету и сказать, куда запись должна переехать.
 
     Возвращает `{changed: [...], move: Path|None}`. Сам перенос делает вызывающий — он же
@@ -76,6 +77,13 @@ def save(record_dir: Path, fields: dict, *, why: str, family: Path,
         raise Refused("дата пишется как ГГГГ-ММ-ДД")
     if given.get("event") and events and given["event"] not in events:
         raise Refused(f"рубрики «{given['event']}» нет в правилах раскладки")
+    if "discussion" in given:
+        # Пустая строка — «снять ссылку» и СОХРАНЯЕТСЯ пустой: иначе при сборке вернулась бы
+        # ссылка из поста, которую человек только что убрал.
+        try:
+            given["discussion"] = attachments.check_link(given["discussion"], link_hosts or ())
+        except attachments.Refused as error:
+            raise Refused(str(error)) from error
 
     path = record_dir / "record.meta.json"
     meta = _load(path)
@@ -87,7 +95,7 @@ def save(record_dir: Path, fields: dict, *, why: str, family: Path,
     changed = []
     for key in HEAD_KEYS:
         if key in given:
-            head[key] = _clean(given[key], 4000 if key == "summary" else 300)
+            head[key] = _clean(given[key], {"summary": 4000, "discussion": 1000}.get(key, 300))
             changed.append(key)
     for key in LABEL_KEYS:
         if key in given:
@@ -99,6 +107,9 @@ def save(record_dir: Path, fields: dict, *, why: str, family: Path,
             changed.append(key)
     if DATE in given:
         talk[DATE] = str(given[DATE])
+        # ⚠️ И в `head`: `talk` пересобирается из календаря (`make_meta`), и рука там не отличима
+        # от календарной даты; `head` — целиком рука, его инструменты не трогают.
+        head[DATE] = str(given[DATE])
         changed.append(DATE)
 
     if not changed:

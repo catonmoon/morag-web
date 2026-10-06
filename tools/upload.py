@@ -65,6 +65,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 sys.path.insert(0, str(HERE))
 from make_record import slugify  # noqa: E402
+import attach_names  # noqa: E402
 
 HOME = Path(os.environ.get("MORAG_UPLOAD_HOME") or (Path.home() / "morag-upload"))
 SESSION = Path.home() / ".morag-upload" / "session.json"
@@ -898,7 +899,8 @@ def as_list(value) -> list[str]:
     return [str(x).strip() for x in items if str(x).strip()]
 
 
-def check_fields(video: Path, title: str, date: str, slides: str | None) -> dict:
+def check_fields(video: Path, title: str, date: str, slides: str | None,
+                 attach: list[str] | None = None) -> dict:
     """Проверить то, что ввёл человек, ДО долгой работы: час расшифровки и отказ на загрузке
     из-за кривой даты — худшее, что можно сделать с его временем. Возвращает разобранные поля."""
     if not video.is_file():
@@ -916,13 +918,28 @@ def check_fields(video: Path, title: str, date: str, slides: str | None) -> dict
     slides_pdf = Path(slides).expanduser().resolve() if slides else None
     if slides_pdf and not slides_pdf.is_file():
         raise Step(f"нет слайдов {slides_pdf}")
-    return {"id": rid, "ext": ext, "slides": slides_pdf}
+    # Материалы проверяем тем же правилом имени, что и сервер (`attach_names`): отказ сайта
+    # после часа расшифровки из-за расширения — то, чего нельзя делать с временем человека.
+    materials: list[tuple[str, Path]] = []
+    for raw in attach or []:
+        path = Path(raw).expanduser().resolve()
+        if not path.is_file():
+            raise Step(f"нет файла {path}")
+        try:
+            name = attach_names.safe_name(path.name)
+        except ValueError as error:
+            raise Step(str(error)) from None
+        if name in {n for n, _ in materials}:
+            raise Step(f"два материала с одним именем: {name}")
+        materials.append((name, path))
+    return {"id": rid, "ext": ext, "slides": slides_pdf, "materials": materials}
 
 
 def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: list[str] | None = None,
              tags: list[str] | None = None, summary: str = "", slides: str | None = None,
              site: str | None = None, with_stack: bool = False, with_screen: bool = True,
-             wait: bool = True, title_auto: bool = False, should_upload=None, rid: str = "") -> str:
+             wait: bool = True, title_auto: bool = False, should_upload=None, rid: str = "",
+             attach: list[str] | None = None, discussion: str = "") -> str:
     """Весь путь записи: расшифровка → экран → пакет на сайт. Общий для командной строки и для
     страницы (`upload_ui.py`) — шаги, возобновление и сообщения обязаны быть одни и те же.
 
@@ -934,8 +951,11 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
     остаются тем, чем и были, — полями манифеста: идентификатор записи на сайте выдаёт сервер.
     """
     video = Path(video).expanduser().resolve()
-    fields = check_fields(video, title, date, slides)
+    fields = check_fields(video, title, date, slides, attach)
     rid, ext, slides_pdf = (rid or fields["id"]), fields["ext"], fields["slides"]
+    discussion = (discussion or "").strip()
+    if discussion and not discussion.startswith(("http://", "https://")):
+        raise Step("ссылка на обсуждение — адрес вида https://…")
     speakers = as_list(speakers)
     tags = as_list(tags)
     site_url, cookies = load_session(site)
@@ -1002,7 +1022,7 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
     manifest = {"title": title, "date": date, "event": event or "", "tags": tags,
                 "summary": summary or "", "speakers": speakers, "video": f"video.{ext}",
                 # «название подставилось само» — чтобы сервер знал, можно ли его переписать
-                "title_auto": bool(title_auto)}
+                "title_auto": bool(title_auto), "discussion": discussion}
     # ⚠️ Что именно уедет на сайт — ОДНИМ событием, перед самой отправкой. До этого подставленных
     # полей в окне не было вовсе: `field.auto` никто не разбирал, а состояние хранило только
     # введённое при старте — человек видел результат только строкой в свёрнутом логе.
@@ -1016,6 +1036,8 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
         files.append(("slides.zip", work / "slides.zip"))
     if slides_pdf:
         files.append(("slides.pdf", slides_pdf))
+    # Материалы — под `attach-<имя>`: сервер кладёт их в `files/` записи и в её список.
+    files += [(f"attach-{name}", path) for name, path in fields["materials"]]
     # ⚠️ Спрашиваем ПЕРЕД ОТПРАВКОЙ, а не на старте: галочку «загрузить после расшифровки»
     # можно снять ПО ХОДУ работы (владелец, 25.09) — человек увидел расшифровку и передумал.
     # Пакет при этом собран и лежит в рабочей папке: отправить позже — тот же шаг, без пересчёта.
@@ -1262,7 +1284,8 @@ def cmd_run(args: argparse.Namespace) -> int:
              speakers=[s.strip() for s in (args.speakers or "").split(",") if s.strip()],
              tags=[t.strip() for t in (args.tags or "").split(",") if t.strip()],
              summary=args.summary or "", slides=args.slides, site=args.site,
-             with_stack=args.stack, with_screen=not args.no_screen, wait=not args.no_wait)
+             with_stack=args.stack, with_screen=not args.no_screen, wait=not args.no_wait,
+             attach=args.attach or [], discussion=args.discussion or "")
     return 0
 
 
@@ -1306,6 +1329,9 @@ def main() -> int:
     p.add_argument("--tags", help="метки через запятую")
     p.add_argument("--summary", help="аннотация: о чём запись")
     p.add_argument("--slides", help="презентация PDF")
+    p.add_argument("--attach", nargs="+", metavar="ФАЙЛ",
+                   help="материалы: презентации, PDF, ноутбуки… (несколько через пробел)")
+    p.add_argument("--discussion", help="ссылка на обсуждение записи (тред в мессенджере)")
     p.add_argument("--site")
     p.add_argument("--no-screen", action="store_true", help="без экрана из видео (быстрее, но поиск не увидит слайды)")
     p.add_argument("--stack", action="store_true", help="поднять стек транскрибации перед работой и погасить после")

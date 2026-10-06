@@ -99,6 +99,9 @@
       "status": "edited",
       "sha256": "392c1a2cd3c3ecbe096b962d1ee8be6d02beb61899fc6f81ee1fd844fd13ea1b"
     },
+    "app/content/attachments.py": {
+      "status": "ours"
+    },
     "app/content/dist.py": {
       "status": "ours"
     },
@@ -299,6 +302,9 @@
       "status": "ours"
     },
     "tests/test_ask_prompt.py": {
+      "status": "ours"
+    },
+    "tests/test_attachments.py": {
       "status": "ours"
     },
     "tests/test_auth.py": {

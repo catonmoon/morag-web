@@ -84,6 +84,11 @@ export const coverUrl = (id, name) =>
 // Кадры записи для слайдшоу на карточке: имена кадров без людей и рамка обрезки обложки.
 export const getFrames = (id) => getJSON(`/api/records/${encodeURIComponent(id)}/frames${q()}`);
 export const slidesUrl = (id) => `/api/records/${encodeURIComponent(id)}/slides.pdf${q()}`;
+// Материалы записи (презентации, PDF, ноутбуки): список читается из меты на каждый запрос, файл
+// — по пути внутри каталога записи (`files/…` или имя старой колоды), кодируем посегментно.
+export const getFiles = (id) => getJSON(`/api/records/${encodeURIComponent(id)}/files${q()}`);
+export const fileUrl = (id, file) =>
+  `/api/records/${encodeURIComponent(id)}/files/${String(file).split("/").map(encodeURIComponent).join("/")}${q()}`;
 /** Адрес видео. Имя из шапки записи — у перенесённых это ПУТЬ внутри архива
  * («Каталог/Подкаталог/файл.mp4», в сегментах бывают кириллица и пробелы), поэтому кодируем
  * ПОСЕГМЕНТНО: encodeURIComponent целиком превратил бы слэши в %2F, а простая склейка
@@ -203,6 +208,23 @@ export const saveEdits = (id, edits) =>
  */
 export const saveFields = (id, patch) =>
   send(`/api/records/${encodeURIComponent(id)}/fields`, "POST", patch);
+
+/** Приложить материал: тело — сам файл, имя — в адресе (как у загрузки записи, без multipart). */
+export async function attachFile(id, file) {
+  const response = await fetch(`/api/records/${encodeURIComponent(id)}/files/${encodeURIComponent(file.name)}`, {
+    method: "PUT",
+    headers: { Accept: "application/json", "Content-Type": "application/octet-stream" },
+    body: file,
+  });
+  if (response.ok) return response.json();
+  const data = await response.json().catch(() => ({}));
+  if (response.status === 401) toSignin();
+  throw new ApiError(response.status, data.detail || `${file.name}: ${response.status}`);
+}
+
+/** Убрать материал: сервер помечает его в списке, файл остаётся на диске (обратимо). */
+export const detachFile = (id, file) =>
+  send(`/api/records/${encodeURIComponent(id)}/files/${String(file).split("/").map(encodeURIComponent).join("/")}`, "DELETE");
 
 /** Снять все правки записи — обратимость это операция, а не обещание. */
 export const dropEdits = (id) =>

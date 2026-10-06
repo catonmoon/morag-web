@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from ..config import engine_for
-from ..content import words
+from ..content import attachments, words
 
 router = APIRouter(prefix="/api", tags=["site"])
 
@@ -258,6 +258,43 @@ async def record_slides(request: Request, record_id: str, slug: str | None = Non
     if path is None:
         raise HTTPException(404, "у записи нет слайдов")
     return FileResponse(path, media_type="application/pdf")
+
+
+@router.get("/records/{record_id}/files")
+async def record_files(request: Request, record_id: str, slug: str | None = None) -> dict:
+    """Материалы записи — список из меты, читается на каждый запрос: приложенный файл виден
+    сразу, без пересборки индекса записей (тот следит за `record.md`, а мета меняется отдельно)."""
+    corpus = _corpus(request, slug)
+    meta = _meta(corpus, record_id)
+    allowed = request.app.state.cfg.editing.attachments_ext
+    try:
+        found = attachments.items(corpus.index.path_of(meta).parent, allowed)
+    except attachments.Refused as error:
+        raise HTTPException(error.status, str(error))
+    return {"files": found}
+
+
+@router.get("/records/{record_id}/files/{name:path}")
+async def record_file(request: Request, record_id: str, name: str, slug: str | None = None):
+    """Один материал. Только из списка, без пометки «убрано», с разрешённым расширением и
+    внутри каталога записи (`attachments.find`). PDF и картинки — смотреть в браузере, прочее —
+    скачать: pptx браузер не показывает, а отдавать его «инлайн» значит получить мусор на экране.
+    """
+    corpus = _corpus(request, slug)
+    meta = _meta(corpus, record_id)
+    allowed = request.app.state.cfg.editing.attachments_ext
+    try:
+        path = attachments.find(corpus.index.path_of(meta).parent, name, allowed)
+    except attachments.Refused as error:
+        raise HTTPException(error.status, str(error))
+    if path is None:
+        raise HTTPException(404, "нет такого материала")
+    ext = attachments.ext_of(path.name)
+    inline = attachments.INLINE.get(ext)
+    return FileResponse(path, media_type=inline or "application/octet-stream",
+                        filename=path.name,
+                        content_disposition_type="inline" if inline else "attachment",
+                        headers={"X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/records/{record_id}/frame/{name:path}")

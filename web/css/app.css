@@ -1502,3 +1502,19 @@ body[data-view="chat"] .chat-tools{display:flex}
 .pside-text{font:12.5px/1.5 var(--sans);overflow-wrap:anywhere}
 @media (hover:none),(pointer:coarse){.pmark,.pcard,.pside{display:none}}
 
+
+/* Материалы записи: список файлов под аннотацией; в режиме правки — «приложить» и «убрать»,
+   а весь блок принимает перетаскивание. */
+.rd-files{margin:12px 0 4px;padding:10px 14px;border:1px solid var(--line);border-radius:12px;
+          max-width:70ch}
+.rd-files.drop{border-style:dashed;border-color:var(--accent);background:var(--surface-2)}
+.rd-files-title{font:12px/1.5 var(--mono);color:var(--ink-dim);margin-bottom:6px}
+.rd-files-list{list-style:none;margin:0 0 6px;padding:0;display:grid;gap:4px}
+.rd-file{display:flex;align-items:baseline;gap:10px;min-width:0}
+.rd-file a{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.rd-file-ext{font:11px/1.6 var(--mono);text-transform:uppercase;color:var(--ink-dim);
+             min-width:4ch}
+.rd-file-size{font:11px/1.6 var(--mono);color:var(--ink-dim);white-space:nowrap}
+.rd-file-drop{margin-left:auto;font:11px/1.6 var(--mono);color:var(--ink-dim);background:none;
+              border:0;cursor:pointer;padding:0}
+.rd-file-drop:hover{color:var(--danger, #c0392b)}

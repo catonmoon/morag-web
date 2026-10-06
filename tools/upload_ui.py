@@ -169,6 +169,50 @@ def choose() -> dict:
     return by_path(done.stdout.strip())
 
 
+def material(path: str) -> dict:
+    """Материал записи по пути: имя проверено тем же правилом, что на сервере (`attach_names`)."""
+    p = Path(str(path or "").strip().removeprefix("file://")).expanduser()
+    if not p.is_file():
+        raise upload.Step(f"нет файла {p}")
+    try:
+        name = upload.attach_names.safe_name(p.name)
+    except ValueError as error:
+        raise upload.Step(str(error)) from None
+    return {"path": str(p.resolve()), "name": name, "size": p.stat().st_size}
+
+
+def choose_materials() -> dict:
+    """Системный диалог для МАТЕРИАЛОВ — несколько файлов любого разрешённого вида (как `choose`
+    для видео: путь знает только сервер окна)."""
+    if sys.platform != "darwin":
+        raise upload.Step("системный диалог есть только на macOS")
+    script = ('tell me to activate\n'
+              'set fs to choose file with prompt "Материалы записи: презентации, PDF, ноутбуки" '
+              'with multiple selections allowed\n'
+              'set out to ""\n'
+              'repeat with f in fs\n'
+              'set out to out & POSIX path of f & linefeed\n'
+              'end repeat\n'
+              'out')
+    try:
+        done = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=600)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise upload.Step(f"диалог не открылся: {error}") from error
+    if done.returncode != 0:
+        if "-128" in done.stderr or "canceled" in done.stderr.lower():
+            return {"cancelled": True, "files": []}
+        raise upload.Step(done.stderr.strip()[:200] or "диалог не вернул файлов")
+    files, bad = [], []
+    for line in done.stdout.splitlines():
+        if not line.strip():
+            continue
+        try:
+            files.append(material(line))
+        except upload.Step as error:
+            bad.append(str(error))
+    return {"files": files, "refused": bad}
+
+
 def created_at(st) -> float:
     """Когда файл СОЗДАН, а не когда его трогали последний раз.
 
@@ -232,7 +276,7 @@ def start(fields: dict) -> dict:
             raise upload.Step("одна запись уже в работе — дождитесь конца")
         video = Path(fields.get("video") or "").expanduser()
         checked = upload.check_fields(video, fields.get("title") or "", fields.get("date") or "",
-                                      fields.get("slides") or None)
+                                      fields.get("slides") or None, upload.as_list(fields.get("attach")))
         # ⚠️⚠️ Адрес прогона — ОДИН на весь путь записи. Задан (значит, это продолжение: человек
         # поправил поля в карточке и нажал «Загрузить») — берём его, и расшифровка с экраном
         # остаются посчитанными. Иначе запись пересчитывалась целиком из-за правки названия.
@@ -255,6 +299,7 @@ def start(fields: dict) -> dict:
                 speakers=upload.as_list(fields.get("speakers")),
                 tags=upload.as_list(fields.get("tags")),
                 summary=fields.get("summary") or "", slides=fields.get("slides") or None,
+                attach=upload.as_list(fields.get("attach")), discussion=fields.get("discussion") or "",
                 with_stack=bool(fields.get("stack", True)), with_screen=not fields.get("no_screen"),
                 wait=True, title_auto=bool(fields.get("title_auto")), rid=rid,
                 should_upload=lambda: bool(STATE.get("send", True)))
@@ -421,6 +466,12 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/api/pick":
                 self._json(choose())
                 return
+            if url.path == "/api/pick-materials":
+                self._json(choose_materials())
+                return
+            if url.path == "/api/material":
+                self._json(material(str(body.get("path") or "")))
+                return
             if url.path == "/api/file":
                 self._json(by_path(str(body.get("path") or "")))
                 return
@@ -432,7 +483,7 @@ class Handler(BaseHTTPRequestHandler):
                 given = body.get("fields") or {}
                 if isinstance(given, dict) and given:
                     fields = dict(STATE.get("fields") or {})
-                    for key in ("title", "date", "event", "tags", "speakers", "summary"):
+                    for key in ("title", "date", "event", "tags", "speakers", "summary", "discussion"):
                         if key in given:
                             fields[key] = given[key]
                     fields["title_auto"] = False if "title" in given else fields.get("title_auto")

@@ -26,9 +26,12 @@ const api = async (path, body) => {
 };
 const id = (x) => document.getElementById(x);
 const size = (n) => n >= 1e9 ? (n / 1e9).toFixed(1) + " ГБ" : Math.round(n / 1e6) + " МБ";
+// Материалы бывают по десятку килобайт — «0 МБ» про них ничего не говорит.
+const small = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + " МБ" : Math.max(1, Math.round(n / 1e3)) + " КБ";
 const when = (t) => new Date(t * 1000).toLocaleDateString("ru-RU", {day: "numeric", month: "short"});
 
 let picked = null;       // {path, name, size}
+let materials = [];      // [{path, name, size}] — уедут с записью под `attach-<имя>`
 let titleTouched = false;
 let lastLogLen = -1;
 let videos = [];
@@ -305,6 +308,41 @@ async function openDialog() {
   }
 }
 
+// --- материалы записи -------------------------------------------------------------------------
+// Пути знает только сервер окна (как у видео): системный диалог или перетаскивание в нативное окно.
+
+function renderMaterials() {
+  id("materials").replaceChildren(...materials.map((m, i) =>
+    el("li", {},
+       el("span", { text: m.name }),
+       el("i", { text: small(m.size) }),
+       el("button", { type: "button", class: "ghost", title: "Не прикладывать",
+                      onclick: () => { materials.splice(i, 1); renderMaterials(); } }, "×"))));
+}
+
+function addMaterial(m) {
+  if (!materials.some((x) => x.name === m.name)) materials.push(m);
+}
+
+id("add-materials").onclick = async () => {
+  try {
+    const r = await api("/api/pick-materials", {});
+    (r.files || []).forEach(addMaterial);
+    renderMaterials();
+    id("msg").textContent = (r.refused || []).join("; ");
+  } catch (e) { id("msg").textContent = e.message; }
+};
+
+/** Нативное окно отдаёт сюда пути брошенных НЕ-видео файлов (tools/upload_app.py). */
+window.dropMaterials = async (paths) => {
+  for (const path of paths) {
+    try { addMaterial(await api("/api/material", { path })); }
+    catch (e) { id("msg").textContent = e.message; }
+  }
+  renderMaterials();
+  id("more").open = true;
+};
+
 drop.addEventListener("click", (ev) => {
   if (picked || ev.target.id === "path") return;
   openDialog();
@@ -476,7 +514,8 @@ id("go").onclick = async () => {
       video: picked.path, title: id("title").value.trim(), date: id("date").value,
       send: id("send").checked,
       event: id("event").value, speakers: id("speakers").value, tags: id("tags").value,
-      summary: id("summary").value, slides: id("slides").value.trim(), stack: true, title_auto: !titleTouched,
+      summary: id("summary").value, stack: true, title_auto: !titleTouched,
+      attach: materials.map((m) => m.path), discussion: id("discussion").value.trim(),
     });
     lastLogLen = -1;
     cursor = 0;
@@ -497,7 +536,9 @@ id("go").onclick = async () => {
 id("again").onclick = async () => {
   await api("/api/reset", {});
   picked = null; titleTouched = false; lastLogLen = -1;
-  ["title", "speakers", "summary", "tags", "slides"].forEach((x) => { id(x).value = ""; });
+  ["title", "speakers", "summary", "tags", "discussion"].forEach((x) => { id(x).value = ""; });
+  materials = [];
+  renderMaterials();
   resetDrop();
   await tick();
 };

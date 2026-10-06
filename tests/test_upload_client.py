@@ -505,3 +505,20 @@ def test_voices_are_asked_right_after_diarization_not_after_the_whole_run(tmp_pa
     # приезжал одним человеком (01.10).
     assert (work / upload.EARLY_PRINTS).is_file(), "ранние отпечатки легли рядом — для показа"
     assert not (work / "voices.json").is_file(), "…но не под именем, которое едет на сервер"
+
+
+def test_materials_are_checked_before_the_long_work(tmp_path):
+    """Материал с запретным расширением отклоняется ДО часа расшифровки, тем же правилом имени,
+    что и на сервере (`attach_names`); имя уходит в пакет уже очищенным."""
+    video = tmp_path / "talk.mp4"
+    video.write_bytes(b"\0")
+    deck = tmp_path / "Доклад про индексы.PPTX"
+    deck.write_bytes(b"PK")
+    out = upload.check_fields(video, "Индексы", "2026-03-12", None, [str(deck)])
+    assert out["materials"] == [("Доклад про индексы.pptx", deck.resolve())]
+    page = tmp_path / "page.html"
+    page.write_text("<b>")
+    with pytest.raises(upload.Step):
+        upload.check_fields(video, "Индексы", "2026-03-12", None, [str(page)])
+    with pytest.raises(upload.Step):
+        upload.check_fields(video, "Индексы", "2026-03-12", None, [str(tmp_path / "нет.pdf")])

@@ -91,6 +91,18 @@ def test_only_listed_files_are_accepted():
     assert core.accept_name("artifact.json") and core.accept_name("video.webm") and core.accept_name("slides.zip")
     for bad in ("../x", "record.md", "video.exe", "artifact.json.bak", ""):
         assert not core.accept_name(bad)
+    assert core.accept_name("attach-Доклад.pptx") and core.accept_name("attach-notes.ipynb")
+    for bad in ("attach-page.html", "attach-", "attach-.pdf", "attach-a/b.pdf"):
+        assert not core.accept_name(bad), bad
+
+
+def test_discussion_link_is_checked(tmp_path):
+    base = {"title": "Норм", "date": "2026-03-12", "video": "a.mp4"}
+    assert core.validate({**base, "discussion": " https://chat.example.org/t/pl/1 "}, tmp_path,
+                         link_hosts=["chat.example.org"]).discussion == "https://chat.example.org/t/pl/1"
+    with pytest.raises(core.Refused):
+        core.validate({**base, "discussion": "https://evil.example.com/x"}, tmp_path,
+                      link_hosts=["chat.example.org"])
 
 
 # --- живое приложение на копии демо-корпуса --------------------------------------------
@@ -374,3 +386,22 @@ def test_options_list_events_and_file_names(live):
     c, demo, *_ = live
     body = c.get("/api/upload/options").json()
     assert body["events"] == [] and "artifact.json" in body["files"] and "mp4" in body["video_ext"]
+
+
+def test_materials_and_discussion_come_with_the_upload(live):
+    """Материалы пакета ложатся в `files/` и в список меты, `slides.pdf` — тоже в список, ссылка
+    на обсуждение — в шапку (через руку `head.discussion`, которую пересборка меты не трогает)."""
+    c, demo, _, _ = live
+    rid = c.post("/api/upload", json=manifest(discussion="https://chat.example.org/t/pl/abc")).json()["id"]
+    upload_all(c, rid)
+    assert c.put(f"/api/upload/{rid}/files/slides.pdf", content=b"%PDF-1.4").status_code == 200
+    assert c.put(f"/api/upload/{rid}/files/attach-Код.ipynb", content=b"{}").status_code == 200
+    assert c.put(f"/api/upload/{rid}/files/attach-x.html", content=b"<b>").status_code == 400
+    assert c.post(f"/api/upload/{rid}/finish").status_code == 200
+    assert wait(c, rid)["state"] == "done"
+    record = demo / "records" / rid
+    head = yaml.safe_load((record / "record.md").read_text(encoding="utf-8").split("---\n", 2)[1])
+    assert head["discussion"] == "https://chat.example.org/t/pl/abc"
+    files = c.get(f"/api/records/{rid}/files", params={"slug": "demo"}).json()["files"]
+    assert [f["file"] for f in files] == ["slides.pdf", "files/Код.ipynb"]
+    assert all(f["from"] == "upload" for f in files)
