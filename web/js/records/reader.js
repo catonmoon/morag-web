@@ -1286,8 +1286,12 @@ export async function renderReader(id, sec = 0, {
     // пустил снова — и текст опять перед глазами. Плавно, чтобы было видно,
     // куда именно тебя вернули.
     // Проигрывание одного слова в правке страницу не двигает: курсор в тексте, правят там.
+    // На паузе не следим вовсе: человек остановил звук, чтобы посмотреть кадр на ленте или
+    // перечитать абзац, а слежение через `pauseMs` после его прокрутки утаскивало страницу
+    // обратно к «звучащему» слову, которое не звучит. Перемотки на паузе (полоса, лента
+    // кадров, «‹‹ ››») показывают место сами — через `reveal`.
     if (started && word && stopAt == null) track?.jump(word, { smooth: !track.lost(word) });
-    else if (word) track?.follow(word);
+    else if (word && s.playing) track?.follow(word);
 
     backToLive.toggleAttribute("hidden", !(s.playing && word && track?.lost(word)));
   });
