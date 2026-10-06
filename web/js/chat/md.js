@@ -138,6 +138,9 @@ export function renderMarkdown(text, { makeRef, onClaim } = {}) {
       if (!list || list.tagName.toLowerCase() !== wanted) {
         flushList();
         list = el(wanted);
+        // Пункты через пустую строку разбиваются на отдельные <ol>: без start каждый был бы «1.».
+        const number = ordered && !bullet ? Number.parseInt(line, 10) : NaN;
+        if (number > 1) list.setAttribute("start", String(number));
       }
       list.append(withClaims(el("li"), (bullet || ordered)[1], makeRef, onClaim));
       continue;

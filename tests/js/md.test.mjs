@@ -308,6 +308,17 @@ check("--- — горизонтальная черта", () => {
   assert.deepEqual(tags(renderMarkdown("раз\n\n---\n\nдва")), ["P", "HR", "P"]);
 });
 
+check("пункты через пустую строку: номер не сбрасывается в 1", () => {
+  const ref = () => new Node_("a");
+  const spread = renderMarkdown("1. раз\n\n2. два\n\n3. три", { makeRef: ref });
+  const starts = spread.kids.filter((k) => k.tagName === "OL").map((k) => k.attrs.start);
+  assert.deepEqual(starts, [undefined, "2", "3"]);
+  const tight = renderMarkdown("1. раз\n2. два\n3. три", { makeRef: ref });
+  const lists = tight.kids.filter((k) => k.tagName === "OL");
+  assert.equal(lists.length, 1);
+  assert.equal(lists[0].kids.length, 3);
+});
+
 // Сам KaTeX — тот, что лежит у сайта: набирает, битое не роняет, опасное не пускает.
 const { createRequire } = await import("node:module");
 globalThis.katex = createRequire(import.meta.url)(join(repo, "web/assets/vendor/katex/katex.min.js"));
