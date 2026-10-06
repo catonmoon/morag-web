@@ -2,7 +2,7 @@
 //
 // Строим DOM-узлы, а не строку HTML: текст ответа сочиняет модель, и innerHTML
 // на нём — это дыра для инъекции. Поддерживаем ровно то, что модель реально
-// использует: абзацы, заголовки, списки, **жирный**, *курсив*, `код`, ссылки,
+// использует: абзацы, заголовки, списки, таблицы, **жирный**, *курсив*, `код`, ссылки,
 // черту `---`, формулы TeX и наши маркеры цитат [N].
 //
 // Формулы: модели пишут LaTeX — `\(…\)` и `\[…\]` (так deepseek), `$…$` и `$$…$$`
@@ -12,12 +12,31 @@
 import { el } from "../ui/dom.js";
 
 const INLINE =
-  /\*\*([^*]+)\*\*|__([^_]+)__|`([^`]+)`|\[(\d+)\]|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*([^*\n]+)\*/g;
+  /\*\*((?:`[^`]*`|[^*])+)\*\*|__([^_]+)__|`([^`]+)`|\[(\d+)\]|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*([^*\n]+)\*/g;
 
 const HEADING = /^(#{1,6})\s+(.*)$/;
 const BULLET = /^\s*[-*•]\s+(.*)$/;
 const ORDERED = /^\s*\d+[.)]\s+(.*)$/;
 const RULE = /^(?:-{3,}|\*{3,}|_{3,})$/;
+
+// Таблица: строка начинается с «|», под заголовком — строка-разделитель `|---|:--:|--:|`.
+const TABLE_ROW = /^\|.*\|?$/;
+const TABLE_SEP = /^\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?$/;
+
+/** Ячейки строки `| a | b |`: без крайних «|», экранированный `\|` остаётся внутри ячейки. */
+function tableCells(line) {
+  const MARK = "\u0000";
+  let body = line.trim().replaceAll("\\|", MARK);
+  if (body.startsWith("|")) body = body.slice(1);
+  if (body.endsWith("|")) body = body.slice(0, -1);
+  return body.split("|").map((cell) => cell.replaceAll(MARK, "|").trim());
+}
+
+/** Выравнивание столбцов из строки-разделителя: `:--:` — центр, `--:` — вправо. */
+function tableAligns(sepLine) {
+  return tableCells(sepLine).map((c) =>
+    c.startsWith(":") && c.endsWith(":") ? "al-c" : c.endsWith(":") ? "al-r" : "");
+}
 
 // Формула в строке. `$…$` — по правилу pandoc: после открывающего и перед
 // закрывающим нет пробела, за закрывающим нет цифры — иначе «от $5 до $10»
@@ -40,6 +59,11 @@ function mathRanges(src) {
   return [...src.matchAll(MATH_INLINE)].map((m) => [m.index, m.index + m[0].length]);
 }
 const inside = (ranges, i) => ranges.some(([a, b]) => i > a && i < b);
+
+// Жирное, код и ссылка не должны рваться границей предложения: иначе «**2. Название**» разъезжается
+// по двум кускам (точка после «2.» — «конец предложения»), и «**» остаются в тексте ответа.
+const SPAN = /\*\*(?:`[^`]*`|[^*])+\*\*|__[^_]+__|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^\s)]+\)/g;
+const spanRanges = (src) => [...src.matchAll(SPAN)].map((m) => [m.index, m.index + m[0].length]);
 
 /**
  * @param {string} text  сырой текст ответа
@@ -74,8 +98,8 @@ export function renderMarkdown(text, { makeRef, onClaim } = {}) {
     flushList();
   };
 
-  for (const raw of lines) {
-    const line = raw.trim();
+  for (let row = 0; row < lines.length; row++) {
+    const line = lines[row].trim();
 
     if (math) {
       math.lines.push(line);
@@ -112,6 +136,39 @@ export function renderMarkdown(text, { makeRef, onClaim } = {}) {
     if (RULE.test(line)) {
       flushAll();
       frag.append(el("hr"));
+      continue;
+    }
+
+    if (line.startsWith("|") && TABLE_ROW.test(line) && TABLE_SEP.test((lines[row + 1] || "").trim())
+        && (lines[row + 1] || "").includes("|")) {
+      flushAll();
+      const head = tableCells(line);
+      const aligns = tableAligns(lines[row + 1]);
+      const cols = head.length;
+      const cell = (tag, text, i) => {
+        const node = withClaims(el(tag, { class: aligns[i] || null }), text, makeRef, onClaim);
+        return node;
+      };
+      const table = el("table");
+      const thead = el("thead");
+      const headRow = el("tr");
+      head.forEach((text, i) => headRow.append(cell("th", text, i)));
+      thead.append(headRow);
+      table.append(thead);
+      const tbody = el("tbody");
+      let next = row + 2;
+      while (next < lines.length && lines[next].trim().startsWith("|")) {
+        const cells = tableCells(lines[next]);
+        const tr = el("tr");
+        for (let i = 0; i < cols; i++) tr.append(cell("td", cells[i] ?? "", i)); // лишние ячейки отбрасываем, недостающие — пустые
+        tbody.append(tr);
+        next++;
+      }
+      table.append(tbody);
+      const wrap = el("div", { class: "table-wrap" });
+      wrap.append(table);
+      frag.append(wrap);
+      row = next - 1;
       continue;
     }
 
@@ -186,7 +243,7 @@ export function claimsByRef(text) {
   const src = String(text || "").replace(/\r\n/g, "\n");
   const out = new Map();
   const ranges = mathRanges(src);
-  const edges = claimEdges(src, ranges);
+  const edges = claimEdges(src, [...ranges, ...spanRanges(src)]);
   for (const m of src.matchAll(/\[(\d+)\]/g)) {
     const n = Number(m.group?.[1] ?? m[1]);
     if (!Number.isFinite(n) || inside(ranges, m.index)) continue;
@@ -222,7 +279,7 @@ function withClaims(node, text, makeRef, onClaim) {
   const ranges = mathRanges(src);
   const marks = [...src.matchAll(/\[(\d+)\]/g)].filter((m) => !inside(ranges, m.index));
   if (!marks.length) return inlineInto(node, src, makeRef);
-  const edges = claimEdges(src, ranges);
+  const edges = claimEdges(src, [...ranges, ...spanRanges(src)]);
 
   let cursor = 0;
   for (const mark of marks) {
@@ -298,7 +355,12 @@ function inlinePlain(node, text, makeRef, maths) {
     const [, bold, boldAlt, code, refNum, linkText, linkUrl, italic] = m;
 
     // Внутри жирного и курсива адрес тоже бывает — там его и ловим.
-    if (bold || boldAlt) node.append(withLinks(el("strong"), bold || boldAlt, maths));
+    if (bold || boldAlt) {
+      const inner = bold || boldAlt;
+      // Код внутри жирного (`**`b*`**`) раньше светился обратными кавычками: разбираем вложенное целиком.
+      const strong = inner.includes("`") ? inlinePlain(el("strong"), inner, makeRef, maths) : withLinks(el("strong"), inner, maths);
+      node.append(strong);
+    }
     else if (code) node.append(el("code", { text: unmask(code, maths) })); // в коде адрес и TeX — текст
     else if (refNum) {
       const ref = makeRef?.(Number(refNum));

@@ -308,6 +308,73 @@ check("--- — горизонтальная черта", () => {
   assert.deepEqual(tags(renderMarkdown("раз\n\n---\n\nдва")), ["P", "HR", "P"]);
 });
 
+// --- таблицы -----------------------------------------------------------------
+const refStub = () => new Node_("a");
+const kids = (n) => n.kids.filter((k) => k instanceof Node_);
+const text = (n) => n.textContent;
+const tableOf = (src) => {
+  const out2 = renderMarkdown(src, { makeRef: refStub });
+  const wrap = kids(out2).find((k) => k.tagName === "DIV" && k.attrs.class === "table-wrap");
+  return { out: out2, wrap, table: wrap && kids(wrap)[0] };
+};
+const rowsOf = (table) => kids(kids(table).find((k) => k.tagName === "TBODY")).map((tr) => kids(tr).map(text));
+const headOf = (table) => kids(kids(kids(table).find((k) => k.tagName === "THEAD"))[0]).map(text);
+
+check("таблица: заголовок и строки", () => {
+  const { table } = tableOf(
+    "| Вариант | Назначение | Способ |\n|---|---|---|\n| Первый | Описание один | Способ А |\n| Второй | Описание два | Способ Б |",
+  );
+  assert.ok(table, "таблица не собрана");
+  assert.deepEqual(headOf(table), ["Вариант", "Назначение", "Способ"]);
+  assert.deepEqual(rowsOf(table), [
+    ["Первый", "Описание один", "Способ А"],
+    ["Второй", "Описание два", "Способ Б"],
+  ]);
+});
+check("таблица: выравнивание из разделителя", () => {
+  const { table } = tableOf("| a | b | c |\n|:--|:-:|--:|\n| 1 | 2 | 3 |");
+  const cls = kids(kids(kids(table).find((k) => k.tagName === "THEAD"))[0]).map((c) => c.attrs.class);
+  assert.deepEqual(cls, [undefined, "al-c", "al-r"]);
+});
+check("таблица: короткая строка дополняется, длинная обрезается", () => {
+  const { table } = tableOf("| a | b |\n|---|---|\n| 1 |\n| 1 | 2 | 3 |");
+  assert.deepEqual(rowsOf(table), [["1", ""], ["1", "2"]]);
+});
+check("таблица: экранированная черта остаётся в ячейке", () => {
+  const { table } = tableOf("| a | b |\n|---|---|\n| x \\| y | z |");
+  assert.deepEqual(rowsOf(table), [["x | y", "z"]]);
+});
+check("таблица: до и после идут абзацы, таблица не глотает текст", () => {
+  const { out: o } = tableOf("Вот сравнение:\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nИтог: всё ясно.");
+  const tags2 = kids(o).map((k) => k.tagName);
+  assert.deepEqual(tags2, ["P", "DIV", "P"]);
+  assert.ok(text(kids(o)[2]).includes("Итог"));
+});
+check("строка с «|» без разделителя — не таблица", () => {
+  const { wrap } = tableOf("| просто | текст |\nи ещё строка");
+  assert.equal(wrap, undefined);
+});
+check("таблица: цитата [N] в ячейке становится ссылкой", () => {
+  const { table } = tableOf("| a | b |\n|---|---|\n| факт [3] | 2 |");
+  const cell = kids(kids(kids(table).find((k) => k.tagName === "TBODY"))[0])[0];
+  const hasTag = (node, tag) => kids(node).some((k) => k.tagName === tag || hasTag(k, tag));
+  assert.ok(hasTag(cell, "A"), "ссылка на момент не создана");
+});
+
+check("жирное со сноской не рвётся на «2. » внутри: «**» не остаются", () => {
+  const cases = [
+    "Первый пункт [1].\n\n**2. Название раздела**: пояснение к нему [2].",
+    "Суть: **для краткости, т. е. когда нужно, берут вариант** [3]. Дальше текст.",
+    "Список: `a. b` и **жирное. с точкой** [4].",
+    "Формула:\n**`b* = (X) y`** [5].",
+  ];
+  for (const src of cases) {
+    const r = renderMarkdown(src, { makeRef: (n) => { const a = new Node_("a"); a.textContent = String(n); return a; } });
+    const t = flat(r);
+    assert.ok(!t.includes("**"), "остались звёздочки: " + t.slice(0, 120));
+  }
+});
+
 // Сам KaTeX — тот, что лежит у сайта: набирает, битое не роняет, опасное не пускает.
 const { createRequire } = await import("node:module");
 globalThis.katex = createRequire(import.meta.url)(join(repo, "web/assets/vendor/katex/katex.min.js"));

@@ -627,6 +627,11 @@ footer .disc{margin-left:auto;font-style:italic;opacity:.85;text-align:right}
 .answer{overflow-wrap:anywhere}
 .answer > *:first-child{margin-top:0}
 .answer > *:last-child{margin-bottom:0}
+.answer .table-wrap{overflow-x:auto;margin:0 0 .9em}
+.answer table{border-collapse:collapse;width:100%;font-size:.9em;line-height:1.4}
+.answer th,.answer td{border:1px solid var(--line);padding:.4em .65em;text-align:left;vertical-align:top;min-width:7em;overflow-wrap:normal;word-break:normal;hyphens:auto}
+.answer th{background:var(--surface-2);font-weight:600}
+.answer .al-c{text-align:center} .answer .al-r{text-align:right}
 .answer h3,.answer h4{font-family:var(--serif);font-weight:700;line-height:1.2;
   margin:1.3em 0 .4em;letter-spacing:.1px;text-wrap:balance}
 .answer h3{font-size:1.5em}
