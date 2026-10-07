@@ -18,7 +18,8 @@ addEventListener("error", (e) => {
   showBootError(`не загрузился ${e.target.src || "модуль"}`);
 }, true);
 addEventListener("unhandledrejection", (e) => showBootError(String(e.reason?.message || e.reason)));
-setTimeout(() => { if (!document.body.dataset.view) showBootError("приложение не запустилось"); }, 4000);
+// 15 с, а не 4: на холодном кэше и в медленной сети страница честно стартует дольше (~50 запросов).
+setTimeout(() => { if (!document.body.dataset.view) showBootError("приложение не запустилось"); }, 15000);
 function showBootError(text) {
   if (document.getElementById("boot-error")) return;
   const box = document.createElement("div");
@@ -28,6 +29,9 @@ function showBootError(text) {
     "background:#4a1f1f;color:#ffd9d0;border:1px solid #8d4a3c";
   box.textContent = `Не удалось запустить страницу: ${text}. Обновите жёстко (Cmd/Ctrl+Shift+R).`;
   document.body.prepend(box);
+  // Приложение могло просто стартовать медленно: как только оно запустилось, плашка не нужна.
+  // Если модуль не загрузился совсем, `data-view` не появится — плашка останется.
+  const gone = setInterval(() => { if (document.body.dataset.view) { box.remove(); clearInterval(gone); } }, 500);
 }
 </script>
 </head>
