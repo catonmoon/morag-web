@@ -83,6 +83,9 @@
       "status": "edited",
       "sha256": "7d77c0892f10506ce732e286cefcdf41b681acc225d4df7501ddcfd1922e915e"
     },
+    "app/chat/record_direct.py": {
+      "status": "ours"
+    },
     "app/chat/topic.py": {
       "status": "edited",
       "sha256": "9edba43477f542dd04e0ff961707c31ee3be4af94fdfd8accb6bcb62e4c8760f"
@@ -391,6 +394,9 @@
     "tests/test_pages.py": {
       "status": "edited",
       "sha256": "c81d2d48f30ea7165e2e8347ead6a196338670a2dc7d1c452ad21525360e615c"
+    },
+    "tests/test_record_direct.py": {
+      "status": "ours"
     },
     "tests/test_registry.py": {
       "status": "ours"

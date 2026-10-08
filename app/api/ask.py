@@ -18,7 +18,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from ..chat.prompt import build_messages, compose_about_record, compose_question
-from ..content.resolve import make_resolver
+from ..chat.record_direct import CitationStream, build_context, load_screens
+from ..content.resolve import make_resolver, media_url
 from ..content.transcript import load_utterances
 from ..engine import frames
 from ..engine.normalize import StreamNormalizer
@@ -37,6 +38,8 @@ NOTHING = "Движок вернул пустой ответ. Попробуйт
 # или лёг LLM-эндпоинт за ним, и снаружи это ОДИН И ТОТ ЖЕ «не получилось». Инциденты 17–18.09
 # ушли на то, чтобы различить их руками; теперь на пути ошибки мы спрашиваем сам эндпоинт.
 LLM_DOWN = "LLM-шлюз не отвечает — поиск временно без ответов. Мы уже знаем, попробуйте позже."
+DIRECT_DOWN = "LLM-шлюз не отвечает — попробуйте чуть позже."
+DIRECT_READING = "📖 Читаю запись целиком"
 
 
 async def _failure(state, generic: str) -> str:
@@ -61,6 +64,58 @@ def _client_ip(request: Request, hops: int) -> str | None:
     return request.client.host if request.client else None
 
 
+def _direct_context(state, corpus, record, history: list[dict]):
+    """(контекст, запись), если на вопрос к записи можно ответить без движка; иначе None.
+
+    Без движка — когда путь включён, запись читается и влезает в окно вместе с историей.
+    Не влезла — вопрос уходит, как раньше, в движок режима записи (там она режется по чанкам).
+    """
+    answerer = getattr(state, "record_direct", None)
+    if answerer is None or not answerer.enabled:
+        return None
+    try:
+        utterances = load_utterances(corpus.index.path_of(record))
+    except OSError:
+        log.warning("прямой путь: запись %s не читается — вопрос в движок", record.id)
+        return None
+    if not utterances:
+        return None
+    settings = (corpus.chat or {}).get("record_direct") or {}
+    ctx = build_context(record, utterances, load_screens(corpus.index.path_of(record).parent),
+                        prompt=str(settings.get("prompt") or ""),
+                        anon_voices=answerer.cfg.anon_voices)
+    if not answerer.fits(ctx, sum(len(str(m.get("content") or "")) for m in history)):
+        log.info("прямой путь: запись %s не влезает в окно (%d знаков) — вопрос в движок",
+                 record.id, len(ctx.system))
+        return None
+    return ctx, record
+
+
+async def _direct_stream(state, messages: list[dict], norm: CitationStream):
+    """Кадры прямого пути: статус, токены и цитаты, пульс в тишине; ошибка шлюза — кадр error."""
+    yield frames.status(DIRECT_READING)
+    last = time.monotonic()
+    try:
+        async for piece in state.record_direct.stream(messages):
+            for frame in norm.feed(piece):
+                yield frame
+                last = time.monotonic()
+            if time.monotonic() - last > HEARTBEAT_AFTER:
+                yield frames.HEARTBEAT
+                last = time.monotonic()
+        for frame in norm.flush():
+            yield frame
+    except httpx.HTTPError as exc:
+        log.warning("прямой путь: шлюз не ответил: %s", type(exc).__name__)
+        yield frames.error(DIRECT_DOWN)
+        return
+    if norm.tokens and norm.citations == 0:
+        # Ответ без единой ссылки на запись — замеченный на стенде брак (модель сочинила
+        # «метрики» и «риски» по общим знаниям). Поток уже отдан; знаем об этом по журналу.
+        log.warning("прямой путь: ответ без ссылок на запись (меток %d, мимо %d)",
+                    norm.marks, norm.missed)
+
+
 @router.post("/ask")
 async def ask(request: Request, payload: AskRequest):
     state = request.app.state
@@ -83,11 +138,16 @@ async def ask(request: Request, payload: AskRequest):
         # служебный префикс OWUI — движок молча вернёт пустой поток
         raise HTTPException(400, "недопустимый вопрос")
 
+    history = [m.model_dump() for m in payload.history]
     # контекст чтения собираем сами: клиенту доверять окно нельзя
-    composed, ctx_meta = question, None
+    composed, ctx_meta, direct = question, None, None
     if payload.context:
         record = corpus.index.by_id(payload.context.record_id)
         if record and payload.context.scope == "record":
+            direct = _direct_context(state, corpus, record, history)
+        if direct:
+            ctx_meta = {"record_id": record.id, "scope": "record"}
+        elif record and payload.context.scope == "record":
             # Вопрос про запись ЦЕЛИКОМ: реплики не читаем — в промпт они не идут, а это чтение
             # файла на каждый вопрос. Ограничение держится идентификатором записи в тексте.
             composed = compose_about_record(
@@ -113,10 +173,14 @@ async def ask(request: Request, payload: AskRequest):
 
     messages = build_messages(
         composed,
-        [m.model_dump() for m in payload.history],
+        history,
         turns=cfg.limits.history_turns,
         history_max_chars=cfg.limits.history_max_chars,
     )
+    if direct:
+        # Запись — системным сообщением ПЕРВОЙ: тот же префикс у каждого вопроса к записи, и
+        # шлюз отвечает на второй вопрос почти сразу (замерено: 0.2-0.3 с до первого токена).
+        messages = [{"role": "system", "content": direct[0].system}, *messages]
 
     answer_id = secrets.token_urlsafe(12)  # непредсказуемый: по нему принимаем оценку
     ip = _client_ip(request, cfg.server.trusted_proxy_hops)
@@ -145,6 +209,10 @@ async def ask(request: Request, payload: AskRequest):
     async def stream() -> AsyncIterator[str]:
         started = time.monotonic()
         norm = StreamNormalizer(resolver=make_resolver(corpus.index, corpus.slug, corpus.media_base))
+        if direct:
+            # Тот же набор счётчиков, что у нормализатора движка: журнал и лог их не различают.
+            norm = CitationStream(direct[0], record_id=direct[1].id, title=direct[1].title,
+                                  media=media_url(direct[1], corpus.slug, corpus.media_base))
         status = "ok"
         # Тема считается по вопросу и каталогу, ответа не ждёт — поэтому уходит
         # в фон сразу и успевает появиться, пока агент ищет.
@@ -186,6 +254,22 @@ async def ask(request: Request, payload: AskRequest):
         )
         try:
             yield frames.encode(frames.answer_id(answer_id))
+            if direct:
+                async for frame in _direct_stream(state, messages, norm):
+                    if isinstance(frame, str):  # пульс — уже готовая строка потока
+                        yield frame
+                        continue
+                    if frame.get("type") == "error":
+                        status = "error"
+                    yield frames.encode(frame)
+                if status == "error":
+                    return
+                if norm.tokens == 0:
+                    status = "empty"
+                    yield frames.encode(frames.error(NOTHING))
+                    return
+                yield frames.encode(frames.done())
+                return
             try:
                 async with state.engines[engine_key].stream_chat(messages) as response:
                     if response.status_code != 200:
@@ -258,7 +342,10 @@ async def ask(request: Request, payload: AskRequest):
                     "question": question,
                     "context": ctx_meta,
                     # Какой процесс отвечал: замер режима записи сравнивает «до/после» по журналу.
-                    "engine": "record" if engine_key == record_key else "corpus",
+                    # `direct` — без движка, вся запись в контексте LLM (`chat/record_direct.py`).
+                    "engine": "direct" if direct else "record" if engine_key == record_key else "corpus",
+                    # Меток в ответе и сколько из них мимо записи — ответ без ссылок это брак.
+                    **({"marks": norm.marks, "missed": norm.missed} if direct else {}),
                     "answer": norm.answer_text,
                     "citations": [
                         # ⚠️ Поле называется `rec`, а не `ep`: `ep` — подкастовый номер выпуска,

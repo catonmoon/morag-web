@@ -1208,11 +1208,6 @@ body[data-view="chat"] .chat-tools{display:flex}
   border-radius:10px;padding:9px 15px;font:inherit;font-size:13px;cursor:pointer;transition:filter .15s}
 .qa-send:hover:not(:disabled){filter:brightness(1.06)}
 .qa-send:disabled{opacity:.6;cursor:default}
-/* Галочка под полем: на странице записи вопрос по умолчанию к ней, снятая — уводит в общий чат. */
-.qa-scope{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11.5px;
-  color:var(--ink-faint);cursor:pointer;user-select:none}
-.qa-scope input{accent-color:var(--accent);margin:0}
-.qa-scope:hover{color:var(--ink-dim)}
 .qa-stream{display:flex;flex-direction:column;gap:20px}
 .qa-stream:empty{display:none}
 .qa-stream .turn{max-width:none}

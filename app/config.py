@@ -82,6 +82,30 @@ class TopicCfg(BaseModel):
     timeout: float = 12
 
 
+class RecordDirectCfg(BaseModel):
+    """Вопрос к одной записи БЕЗ движка: вся запись в контексте LLM (`app/chat/record_direct.py`).
+
+    Выключено по умолчанию: у корпуса без LLM-шлюза путь просто молчит, и вопрос идёт в движок,
+    как раньше. Адрес, модель и ключ пусты — берутся у авто-темы (`topic`): это тот же шлюз.
+    """
+
+    enabled: bool = False
+    base_url: str = ""
+    model: str = ""
+    api_key: str = ""
+    max_tokens: int = 3000
+    temperature: float = 0.3
+    # Пауза между кусками потока, не общий лимит: префилл записи в 140k токенов — до ~20 с.
+    read_timeout: float = 120
+    # Окно модели минус запас. Запись не влезает — вопрос идёт в движок режима записи, если он
+    # есть. Оценка по знакам: замерено по `usage.prompt_tokens` шлюза, 0.29–0.32 токена на знак.
+    budget_tokens: int = 180_000
+    tokens_per_char: float = 0.32
+    # Безымянные голоса в контексте — «Участник N», а не номер реестра (иначе номер протекает
+    # в ответ — замерено до четырёх раз на ответ).
+    anon_voices: bool = True
+
+
 class RateLimitCfg(BaseModel):
     """Rate-limit по адресу. Снимается целиком (`enabled: false`) или по одному
     рубежу — нулём в соответствующем поле."""
@@ -406,6 +430,7 @@ class AppConfig(BaseModel):
     voices: VoicesCfg = Field(default_factory=VoicesCfg)
     auth: AuthCfg = Field(default_factory=AuthCfg)
     topic: TopicCfg = Field(default_factory=TopicCfg)
+    record_direct: RecordDirectCfg = Field(default_factory=RecordDirectCfg)
     limits: LimitsCfg = Field(default_factory=LimitsCfg)
     journal: JournalCfg = Field(default_factory=JournalCfg)
 

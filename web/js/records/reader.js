@@ -91,7 +91,7 @@ export async function renderReader(id, sec = 0, {
   fixes = false,
   // Вопрос к этой записи: набор кнопок из конфига корпуса и уход в общий разговор по снятой
   // галочке. Пусто — панели не будет вовсе (у пространства выключен поиск, например).
-  presets = null, onAskCorpus = null, onOpenRecord = null,
+  presets = null, onOpenRecord = null,
   // Моменты экрана: `strip` — лента кадров под видео, `timeline` — метки на полосе плеера с
   // карточкой при наведении (site.yml `reader.frames`, владелец 04.10).
   frames: framesMode = "strip",
@@ -486,7 +486,7 @@ export async function renderReader(id, sec = 0, {
   // включил); караоке и слежение за словом — только у владельца-читалки, иначе страница уезжала
   // бы от карточки, которую сейчас читают.
   const qa = presets
-    ? createAskPanel({ record: meta, presets, onAskCorpus, onOpenRecord, onShareMoment: onShare })
+    ? createAskPanel({ record: meta, presets, onOpenRecord, onShareMoment: onShare })
     : null;
   // Лента кадров под видео (владелец, 02.10: «скрины на таймлайне с подписями — удобно
   // перематываться»). Пуста до прихода кадров и у записей без экрана — тогда не видна вовсе.

@@ -150,10 +150,9 @@ const router = createRouter(
         // голоса и «починить везде» — `voices` (имя и правило действуют на весь корпус).
         editing: can("edit"),
         fixes: can("voices"),
-        // Вопрос к этой записи: кнопки из конфига корпуса; снятая галочка уводит в общий чат.
+        // Вопрос к этой записи: кнопки из конфига корпуса; по всему корпусу — «Спросить» в шапке.
         // Поиск у пространства выключен — панели нет вовсе (сервер и так ответил бы отказом).
         presets: site?.chat_enabled === false ? null : site?.ask_presets || {},
-        onAskCorpus: startChat,
         onOpenRecord: (recordId, at) => router.go({ view: "reader", id: recordId, sec: at }),
         // Моменты экрана: лента под видео или метки на полосе плеера (site.yml `reader.frames`).
         frames: site?.reader?.frames || "strip",

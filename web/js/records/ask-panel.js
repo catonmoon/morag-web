@@ -12,6 +12,10 @@
 // ВЛАДЕЛЬЦА читалка разводит сама (`reader.js`). Цитата из чужой записи играет, как в чате, в
 // мини-панели шапки; «открыть» — обычный переход. После ответа в блоке остаются только моменты
 // со сноской в тексте (`pruneUnreferenced`): запись загружена целиком, и её чанки — это все.
+//
+// Галочки «только у этой записи» больше нет (владелец, 08.10): панель на странице записи
+// спрашивает ВСЕГДА про запись — сайт отвечает по ней сам, без индекса (`chat/record_direct.py`),
+// а вопрос по всему корпусу задаётся кнопкой «Спросить» в шапке.
 import { el } from "../ui/dom.js";
 import { ask, sendFeedback } from "../api.js";
 import { createTurn } from "../chat/view.js";
@@ -27,16 +31,13 @@ const PLACEHOLDER = "Спросить про эту запись…";
 
 /**
  * Панель вопросов к записи.
- * @param {{record: object, presets: object, onAskCorpus: Function,
+ * @param {{record: object, presets: object,
  *          onOpenRecord: Function, onShareMoment: Function}} opts
  */
-export function createAskPanel({ record, presets, onAskCorpus, onOpenRecord, onShareMoment }) {
+export function createAskPanel({ record, presets, onOpenRecord, onShareMoment }) {
   const buttons = presetsFor(presets, record.section).map((preset) => {
     const node = el("button", { class: "qa-preset", type: "button", text: preset.label });
-    node.addEventListener("click", () => {
-      scope.checked = true; // пресет по смыслу «спроси у этой записи» — галочку возвращаем
-      run(preset.question);
-    });
+    node.addEventListener("click", () => run(preset.question));
     return node;
   });
   const row = el("div", { class: "qa-presets" }, ...buttons);
@@ -44,11 +45,9 @@ export function createAskPanel({ record, presets, onAskCorpus, onOpenRecord, onS
   const input = el("input", { class: "qa-input", type: "text", placeholder: PLACEHOLDER,
                               "aria-label": PLACEHOLDER, autocomplete: "off" });
   const send = el("button", { class: "qa-send", type: "submit", text: "Спросить" });
-  const scope = el("input", { type: "checkbox", checked: "" });
-  const scopeLabel = el("label", { class: "qa-scope" }, scope, el("span", { text: "только у этой записи" }));
   const form = el("form", { class: "qa-form" }, input, send);
   const stream = el("div", { class: "qa-stream" });
-  const node = el("section", { class: "rd-qa" }, row, form, scopeLabel, stream);
+  const node = el("section", { class: "rd-qa" }, row, form, stream);
   if (!buttons.length) row.hidden = true;
 
   // История панели — в памяти страницы: разговор про запись кончается вместе с ней, в
@@ -63,13 +62,6 @@ export function createAskPanel({ record, presets, onAskCorpus, onOpenRecord, onS
     event.preventDefault();
     const question = input.value.trim();
     if (!question || busy) return;
-    if (!scope.checked) {
-      // Вопрос по всему корпусу отвечает экран диалога: там цитаты из чужих записей проверяют
-      // карточкой со своим плеером — ровно тем, чего на странице с открытым видео быть не может.
-      input.value = "";
-      onAskCorpus?.(question);
-      return;
-    }
     run(question);
   });
 
@@ -139,9 +131,8 @@ export function createAskPanel({ record, presets, onAskCorpus, onOpenRecord, onS
   return {
     node,
     ask: run,
-    /** Открыть панель под руку: галочка на месте, курсор в поле. */
+    /** Открыть панель под руку: курсор в поле. */
     focus() {
-      scope.checked = true;
       node.scrollIntoView({ block: "center" });
       input.focus({ preventScroll: true });
     },

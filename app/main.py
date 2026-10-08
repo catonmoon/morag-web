@@ -21,6 +21,7 @@ from . import logging as applog
 from . import meta as ogmeta
 from .api import ask, auth as auth_api, edits, upload as upload_api, llm as llm_api, site, voices
 from .auth import AuthService, gate as auth_gate
+from .chat.record_direct import DirectAnswerer
 from .chat.topic import TopicMaker
 from .config import APP_DIR, PRODUCT, _inside, engine_for, family_dir, load_config, load_corpora
 from .engine.client import EngineClient
@@ -113,6 +114,15 @@ async def lifespan(app: FastAPI):
     if not topic_key and cfg.topic.borrow_key_from_corpus and app.state.default_corpus:
         topic_key = app.state.default_corpus.engine_llm_key()
     app.state.topic = TopicMaker(cfg.topic, topic_key)
+    # Вопрос к одной записи без движка — тот же шлюз, что у темы, если своего не задано.
+    rd = cfg.record_direct
+    app.state.record_direct = DirectAnswerer(
+        rd,
+        base_url=rd.base_url or cfg.topic.base_url,
+        model=rd.model or cfg.topic.model,
+        api_key=rd.api_key or topic_key,
+        proxy=cfg.topic.proxy,
+    )
 
     log.info(
         "BFF готов: витрина=%s, пространства=%s, записей=%s, движки=%s",
@@ -128,6 +138,7 @@ async def lifespan(app: FastAPI):
         for client in app.state.engines.values():
             await client.aclose()
         await app.state.topic.aclose()
+        await app.state.record_direct.aclose()
 
 
 def _web_root() -> Path | None:
