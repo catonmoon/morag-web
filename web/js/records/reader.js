@@ -1374,10 +1374,17 @@ export async function renderReader(id, sec = 0, {
       setTimeout(showCard, 400);
     }
     игралаКарточка = карточка;
-    speed.textContent = rateLabel(s.rate);
+    // ⚠️ Подпись и значок — ТОЛЬКО при изменении: состояние приходит несколько раз в секунду, и
+    // перезапись подменяла текстовый узел (или svg) под курсором между нажатием и отпусканием —
+    // браузер не засчитывал клик, «1×» срабатывал лишь по краю кнопки (08.10).
+    const label = rateLabel(s.rate);
+    if (speed.textContent !== label) speed.textContent = label;
     full.hidden = !s.picture;
-    full.innerHTML = s.full ? SHRINK : EXPAND;
-    full.title = s.full ? "Свернуть" : "Во весь экран";
+    if (full.dataset.full !== String(!!s.full)) {
+      full.dataset.full = String(!!s.full);
+      full.innerHTML = s.full ? SHRINK : EXPAND;
+      full.title = s.full ? "Свернуть" : "Во весь экран";
+    }
     // Субтитры прячем там же, где полный экран: у записи без картинки они бессмысленны —
     // весь текст и так лежит под плеером.
     subs.hidden = !s.picture || !s.hasSubs;
