@@ -103,3 +103,70 @@ def test_the_record_moves_when_the_rules_call_it_elsewhere(tmp_path):
     where = record_fields.move(here, out["move"])
     assert where.parent.name == "2026" and (where / "record.md").is_file()
     assert not here.exists(), "старый каталог не остался"
+
+
+# --- выбор рубрики (08.10): список по веткам и адрес переезда ДО сохранения ------------------
+
+HUB = (
+    "spaces: [{slug: local, dir: .}]\n"
+    "routing:\n"
+    "  - {match: {tag: Концерт, event_prefix: Концерт}, space: local, branch: Концерт}\n"
+    "  - {match: {event: Курс A}, space: local, branch: Лекции, sub: [Курс A, '{year}']}\n"
+    "  - {match: {event: Доклады}, space: local, branch: Доклады}\n"
+)
+
+
+def placed(tmp_path: Path) -> tuple[Path, Path]:
+    root, record = prepared(tmp_path)
+    (root / "hub.yml").write_text(HUB, encoding="utf-8")
+    home = root / "records" / "Доклады" / "2026"
+    home.mkdir(parents=True)
+    record.rename(home / RECORD)
+    return root, home / RECORD
+
+
+def options(result: dict) -> dict:
+    return {o["event"]: o for g in result["groups"] for o in g["options"]}
+
+
+def test_rubrics_grouped_by_branch_with_the_move_spelled_out(tmp_path):
+    root, record = placed(tmp_path)
+    record_fields.save(record, {"event": "Доклады", "date": "2026-03-12"}, why="w", family=root,
+                       events=["Доклады"])
+    out = record_fields.rubrics(record, root)
+    assert [g["branch"] for g in out["groups"]] == ["Концерт", "Лекции", "Доклады"]
+    opts = options(out)
+    assert opts["Курс A"]["path"] == ["Лекции", "Курс A", "2026"] and not opts["Курс A"]["stays"]
+    assert opts["Доклады"]["stays"], "своя рубрика — запись уже на месте"
+    assert not any(o["note"] for o in opts.values())
+
+
+def test_a_tag_that_pins_the_record_is_named(tmp_path):
+    """Ключи правила — ИЛИ, и метка срабатывает раньше рубрики: выбор рубрики запись не сдвинет,
+    и человек должен узнать об этом до «Сохранить», а не по тому, что ничего не произошло."""
+    root, record = placed(tmp_path)
+    record_fields.save(record, {"tags": ["Концерт"]}, why="w", family=root, events=["Доклады"])
+    opt = options(record_fields.rubrics(record, root))["Курс A"]
+    assert opt["path"][0] == "Концерт" and "метка «Концерт»" in opt["note"]
+
+
+def test_without_a_date_the_year_level_stays_put(tmp_path):
+    root, record = placed(tmp_path)
+    path = record / "record.meta.json"
+    meta = meta_of(record) if path.is_file() else {}
+    meta.setdefault("talk", {})["date"] = ""
+    meta.setdefault("head", {})["date"] = ""
+    path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    md = record / "record.md"
+    md.write_text("\n".join(ln for ln in md.read_text(encoding="utf-8").splitlines()
+                            if not ln.startswith("date:")) + "\n", encoding="utf-8")
+    opt = options(record_fields.rubrics(record, root))["Курс A"]
+    assert opt["stays"] and "нет даты" in opt["note"]
+
+
+def test_a_rubric_under_a_prefix_rule_is_accepted(tmp_path):
+    """«Концерт 2024» при правиле `event_prefix: Концерт` раскладка принимает — правка тоже."""
+    root, record = placed(tmp_path)
+    out = record_fields.save(record, {"event": "Концерт 2024"}, why="w", family=root,
+                             events=["Концерт", "Курс A", "Доклады"])
+    assert out["move"] is not None and out["move"].parts[-3] == "Концерт"

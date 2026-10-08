@@ -1287,8 +1287,11 @@ body[data-view="chat"] .chat-tools{display:flex}
 .rd-fields{display:grid;gap:10px;margin:14px 0 4px;padding:14px;border:1px solid var(--line);
            border-radius:12px;background:var(--surface-2);max-width:70ch}
 .rd-field{display:grid;gap:4px;font:12px/1.5 var(--mono);color:var(--ink-dim)}
-.rd-field input,.rd-field textarea{width:100%;padding:7px 9px;border:1px solid var(--line);
+.rd-field input,.rd-field textarea,.rd-field select{width:100%;padding:7px 9px;border:1px solid var(--line);
   border-radius:8px;background:var(--surface);color:var(--ink);font:14px/1.5 var(--sans)}
+/* Куда переедет запись с выбранной рубрикой — видно ДО «Сохранить». */
+.rd-rubric-where{margin:0;font:12px/1.5 var(--mono);color:var(--ink-faint)}
+.rd-rubric-where.moves{color:var(--accent)}
 .rd-fields-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .rd-fields-msg{margin:0;font:12px/1.5 var(--mono);color:var(--ink-dim)}
 .rd-post{font-family:var(--mono);font-size:12px}

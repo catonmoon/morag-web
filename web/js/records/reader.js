@@ -22,7 +22,7 @@ import * as player from "../ui/player.js";
 import { fitBox } from "../ui/crop.js";
 import { cardLeft, markAt, marksOf, pickMark } from "./marks.js";
 import { coverUrl, getFrames, getRecords, getWords, transcriptUrl, slidesUrl, mediaUrl,
-         getFiles, fileUrl, attachFile, detachFile, saveEdits, saveFields, promoteFix, getTokens, getVoicesQueue, getVoice,
+         getFiles, getRubrics, fileUrl, attachFile, detachFile, saveEdits, saveFields, promoteFix, getTokens, getVoicesQueue, getVoice,
          renameVoice } from "../api.js";
 
 const PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
@@ -275,7 +275,7 @@ export async function renderReader(id, sec = 0, {
   const fieldRows = [
     ["title", "Название", "text"],
     ["date", "Дата выступления", "date"],
-    ["event", "Рубрика", "text"],
+    ["event", "Рубрика", "rubric"],
     ["category", "Категория", "text"],
     ["topics", "Темы", "list"],
     ["tags", "Метки", "list"],
@@ -286,6 +286,9 @@ export async function renderReader(id, sec = 0, {
     ["discussion", `Ссылка: ${discussionLabel}`, "text"],
   ];
   const fieldInputs = new Map();
+  const rubricSelect = el("select", { "aria-label": "Рубрика" });
+  const rubricWhere = el("p", { class: "rd-rubric-where" });
+  rubricSelect.addEventListener("change", () => showRubricWhere());
   const fieldsMsg = el("p", { class: "rd-fields-msg" });
   const fieldsSave = editing
     ? el("button", { class: "dl-btn rd-fields-save", text: "Сохранить поля" }) : null;
@@ -299,6 +302,15 @@ export async function renderReader(id, sec = 0, {
           const value = key === "tags" || key === "topics" || key === "speakers" || key === "participants"
             ? (raw || []).join(", ")
             : (raw || (key === "summary" ? meta.blurb : "") || "");
+          if (kind === "rubric") {
+            // Рубрика — ВЫБОРОМ из правил раскладки, а не печатью (владелец, 08.10: «надо точно
+            // написать, нет подсказок, выбора»). Пока список не пришёл — одна текущая рубрика;
+            // под выбором — куда переедет запись, до «Сохранить».
+            rubricSelect.append(el("option", { value, text: value || "— без рубрики —" }));
+            rubricSelect.value = value;
+            fieldInputs.set(key, { input: rubricSelect, was: value, list: false });
+            return el("label", { class: "rd-field" }, el("span", { text: label }), rubricSelect, rubricWhere);
+          }
           const input = kind === "area"
             ? el("textarea", { rows: "3" })
             : el("input", { type: kind === "date" ? "date" : "text" });
@@ -309,6 +321,49 @@ export async function renderReader(id, sec = 0, {
         el("div", { class: "rd-fields-line" }, fieldsSave, fieldsMsg))
     : null;
   fieldsSave?.addEventListener("click", () => saveFieldsNow());
+
+  /** Список рубрик по веткам — при первом входе в правку (зрителям запрос не нужен вовсе). */
+  let rubricOptions = null;
+  async function loadRubrics() {
+    if (rubricOptions || !editing) return;
+    try {
+      const data = await getRubrics(meta.id);
+      rubricOptions = new Map();
+      const keep = rubricSelect.value;
+      const groups = (data.groups || []).map((g) =>
+        el("optgroup", { label: g.branch },
+          ...g.options.map((o) => {
+            rubricOptions.set(o.event, o);
+            return el("option", { value: o.event, text: o.event });
+          })));
+      // Текущая рубрика вне правил (старая, ручная) остаётся первой строкой: иначе выбор молча
+      // подставил бы первую рубрику списка, и сохранение увезло бы запись без спроса.
+      const extra = keep && !rubricOptions.has(keep)
+        ? [el("option", { value: keep, text: `${keep} (вне правил)` })] : [];
+      rubricSelect.replaceChildren(...extra, ...groups);
+      rubricSelect.value = keep;
+      showRubricWhere();
+    } catch (error) {
+      rubricWhere.textContent = `Список рубрик не загрузился: ${error.message}`;
+    }
+  }
+
+  /** Подпись под выбором: куда уедет запись с этой рубрикой — или почему останется. */
+  function showRubricWhere() {
+    const o = rubricOptions?.get(rubricSelect.value);
+    const was = fieldInputs.get("event")?.was;
+    if (!o) {
+      rubricWhere.textContent = "";
+      return;
+    }
+    const path = o.path.join(" ▸ ");
+    rubricWhere.textContent = o.note
+      ? `${o.stays ? "Останется на месте" : `→ ${path}`}: ${o.note}`
+      : o.stays
+        ? (rubricSelect.value === was ? `Сейчас: ${path}` : `Останется на месте: ${path}`)
+        : `→ переедет в ${path}`;
+    rubricWhere.classList.toggle("moves", !o.stays && rubricSelect.value !== was);
+  }
   // ⚠️ Форма добавляется в шапку ЗДЕСЬ, а не в её литерале выше: шапка собирается РАНЬШЕ,
   // и ссылка на ещё не объявленную `const` роняла ВСЮ читалку — страница говорила «не удалось
   // загрузить данные» (живьём на сервере 25.09).
@@ -425,6 +480,11 @@ export async function renderReader(id, sec = 0, {
       const out = await saveFields(meta.id, patch);
       for (const [key, rec] of fieldInputs) {
         if (key in patch) rec.was = rec.input.value;
+      }
+      // Рубрика, дата или метки могли передвинуть запись — адреса переезда считаем заново.
+      if ("event" in patch || "date" in patch || "tags" in patch) {
+        rubricOptions = null;
+        loadRubrics();
       }
       fieldsMsg.textContent = out.moved
         ? "Сохранено. Запись переехала по правилам раскладки — в поиске обновится ночной индексацией."
@@ -1026,6 +1086,7 @@ export async function renderReader(id, sec = 0, {
     editMode = true;
     showEditControls(true);
     fieldsForm?.removeAttribute("hidden");
+    loadRubrics();
     renderFiles();
     karaoke?.setEditing(true);
     say("Режим правки: щёлкните в текст и правьте прямо в нём — правка абзаца запоминается, когда уходите из него (Esc — вернуть абзац). «ОК» сохранит всё, «Отменить» вернёт как было.");

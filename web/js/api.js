@@ -87,6 +87,8 @@ export const slidesUrl = (id) => `/api/records/${encodeURIComponent(id)}/slides.
 // Материалы записи (презентации, PDF, ноутбуки): список читается из меты на каждый запрос, файл
 // — по пути внутри каталога записи (`files/…` или имя старой колоды), кодируем посегментно.
 export const getFiles = (id) => getJSON(`/api/records/${encodeURIComponent(id)}/files${q()}`);
+/** Рубрики для формы правки: по веткам, с адресом переезда ЭТОЙ записи (`{current, groups}`). */
+export const getRubrics = (id) => getJSON(`/api/records/${encodeURIComponent(id)}/rubrics${q()}`);
 export const fileUrl = (id, file) =>
   `/api/records/${encodeURIComponent(id)}/files/${String(file).split("/").map(encodeURIComponent).join("/")}${q()}`;
 /** Адрес видео. Имя из шапки записи — у перенесённых это ПУТЬ внутри архива

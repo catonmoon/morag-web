@@ -143,6 +143,17 @@ async def fields(request: Request, record_id: str, payload: Fields) -> dict:
             "queued": queued, "queue": request.app.state.rebuilder.status()}
 
 
+@router.get("/records/{record_id}/rubrics")
+async def rubrics(request: Request, record_id: str) -> dict:
+    """Рубрики для выбора в форме правки — по веткам, с адресом переезда этой записи."""
+    _guard(request)
+    record_dir = _dir(request, record_id)
+    try:
+        return record_fields.rubrics(record_dir, config.family_dir(request.app.state.cfg))
+    except record_fields.Refused as error:
+        raise HTTPException(400, str(error))
+
+
 @router.delete("/records/{record_id}/edits")
 async def drop(request: Request, record_id: str) -> dict:
     """Снять все правки записи. Обратимость — операция, а не обещание."""

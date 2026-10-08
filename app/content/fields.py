@@ -75,7 +75,7 @@ def save(record_dir: Path, fields: dict, *, why: str, family: Path,
         raise Refused("нечего менять")
     if DATE in given and not _is_date(str(given[DATE])):
         raise Refused("дата пишется как ГГГГ-ММ-ДД")
-    if given.get("event") and events and given["event"] not in events:
+    if given.get("event") and events and not known_event(given["event"], family):
         raise Refused(f"рубрики «{given['event']}» нет в правилах раскладки")
     if "discussion" in given:
         # Пустая строка — «снять ссылку» и СОХРАНЯЕТСЯ пустой: иначе при сборке вернулась бы
@@ -156,6 +156,67 @@ def _where(record_dir: Path, head: dict, talk: dict, family: Path) -> Path | Non
     if spaces.within(record_dir, root, branch, levels):
         return None
     return root.joinpath(branch, *levels, record_dir.name)
+
+
+def _rubric_rules(family: Path) -> list[tuple[str, bool, dict]]:
+    """(рубрика, префикс ли, правило) — правила раскладки с веткой, по порядку `routing`."""
+    out, seen = [], set()
+    for rule in spaces._hub(family).get("routing") or []:
+        match = rule.get("match") or {}
+        value = match.get("event") or match.get("event_prefix")
+        if value and rule.get("branch") and value not in seen:
+            seen.add(value)
+            out.append((str(value), not match.get("event"), rule))
+    return out
+
+
+def known_event(event: str, family: Path) -> bool:
+    """Рубрика, которую правила умеют положить на место: точное имя или начало префикса.
+
+    ⚠️ Прежняя сверка была побайтной по списку значений, и рубрика-префикс («Концерт 2024» при
+    правиле `event_prefix: Концерт`) отказывалась при правке, хотя раскладка её принимает.
+    """
+    return any(event == value or (prefix and event.startswith(value))
+               for value, prefix, _ in _rubric_rules(family))
+
+
+def rubrics(record_dir: Path, family: Path) -> dict:
+    """Выбор рубрики для формы правки: все рубрики правил по веткам и куда переедет ЭТА запись.
+
+    Решение владельца 08.10: рубрику выбирают из списка, а не печатают, — точное написание было
+    единственным способом переложить запись, и подсказок не было никаких. Адрес переезда
+    считается теми же правилами, что и при сохранении (метки записи и её дата учтены), — человек
+    видит, куда уедет запись, ДО «Сохранить». Не уедет — сказано почему: метка держит в другой
+    ветке (ключи правила — ИЛИ, метка срабатывает раньше рубрики) или нет даты для года.
+    """
+    md = record_dir / "record.md"
+    fm = read_frontmatter(md) if md.is_file() else {}
+    meta = _load(record_dir / "record.meta.json")
+    head, talk = meta.get("head") or {}, meta.get("talk") or {}
+    current = str(head.get("event") if head.get("event") is not None else fm.get("event") or "")
+    tags = list(head.get("tags") if head.get("tags") is not None else (fm.get("tags") or []))
+    date = str(talk.get(DATE) or fm.get("date") or "")
+    root = _root_of(record_dir, family)
+
+    groups: dict[str, list[dict]] = {}
+    for value, _prefix, rule in _rubric_rules(family):
+        hit = spaces._rule_for(value, tags, family) or {}
+        branch = str(hit.get("branch") or "")
+        levels = spaces.sub_levels(value, tags, date, family) if branch else ()
+        option = {"event": value, "path": [branch, *levels] if branch else [], "note": "",
+                  "stays": False}
+        if hit != rule:  # по содержимому: `_hub` читает файл заново, объекты каждый раз новые
+            tag = (hit.get("match") or {}).get("tag")
+            option["note"] = (f"метка «{tag}» держит запись в ветке «{branch}»" if tag in tags
+                              else f"правило раньше уводит в ветку «{branch}»")
+        if not branch or not levels:
+            option["note"] = option["note"] or "нет даты — год не определить, запись останется на месте"
+            option["stays"] = True
+        elif spaces.within(record_dir, root, branch, levels):
+            option["stays"] = True
+        groups.setdefault(str(rule.get("branch")), []).append(option)
+    return {"current": current,
+            "groups": [{"branch": b, "options": opts} for b, opts in groups.items()]}
 
 
 def _root_of(record_dir: Path, family: Path) -> Path:
