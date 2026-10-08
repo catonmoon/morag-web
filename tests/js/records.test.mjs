@@ -154,6 +154,19 @@ check("вторая ось показывается только там, где 
   assert.deepEqual(subAxis(CORPUS, state({})), []);
 });
 
+check("глубокое дерево: чип — первый уровень, фильтр — по префиксу пути", () => {
+  const deep = [
+    rec("a", "2025-06-26", { section: "Лекции", subgroup: "Курсы/QA/2025 весна/Неделя 01" }),
+    rec("b", "2025-06-26", { section: "Лекции", subgroup: "Курсы/QA/2024/Неделя 03" }),
+    rec("c", "2025-01-01", { section: "Лекции", subgroup: "Видеолекции/Неделя 01/Тема" }),
+  ];
+  assert.deepEqual(subAxis(deep, state({ section: "Лекции" })), ["Видеолекции", "Курсы"]);
+  assert.deepEqual(applyFilters(deep, state({ section: "Лекции", sub: "Курсы" })).map((r) => r.id), ["a", "b"]);
+  assert.deepEqual(applyFilters(deep, state({ section: "Лекции", sub: "Курсы/QA/2024" })).map((r) => r.id), ["b"]);
+  // «Курсы/QA/202» — не префикс уровня: «2024» не начинается с границы.
+  assert.deepEqual(applyFilters(deep, state({ section: "Лекции", sub: "Курсы/QA/202" })), []);
+});
+
 console.log("адрес:");
 
 check("состояние уезжает в адрес и возвращается из него", () => {

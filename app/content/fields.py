@@ -147,11 +147,15 @@ def _where(record_dir: Path, head: dict, talk: dict, family: Path) -> Path | Non
     tags = head.get("tags") if head.get("tags") is not None else (fm.get("tags") or [])
     date = str(talk.get(DATE) or fm.get("date") or "")
     branch = spaces.branch_of(event, list(tags), family)
-    sub = spaces.sub_of(event, list(tags), date, family)
-    if not branch or not sub:
+    levels = spaces.sub_levels(event, list(tags), date, family)
+    if not branch or not levels:
         return None                       # раскладка не решена правилами — не двигаем вслепую
-    want = _root_of(record_dir, family) / branch / sub / record_dir.name
-    return None if want.resolve() == record_dir.resolve() else want
+    root = _root_of(record_dir, family)
+    # Внутри потока на любой глубине (неделя, тема) — на месте: глубже правила раскладывает
+    # человек, и правка поля не должна выдёргивать запись из её недели.
+    if spaces.within(record_dir, root, branch, levels):
+        return None
+    return root.joinpath(branch, *levels, record_dir.name)
 
 
 def _root_of(record_dir: Path, family: Path) -> Path:

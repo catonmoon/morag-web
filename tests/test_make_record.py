@@ -635,7 +635,7 @@ def test_same_person_tolerates_spellings():
     # ⚠️⚠️ Порядок слов у источников разный: метка поста и каталог пишут фамилию первой — иначе
     # в «Выступали» один человек стоял дважды (01.10).
     assert make_record.same_person("Воробьёва Зоя", "Зоя Воробьёва")           # метка поста
-    assert make_record.same_person("Кузнецова Любовь Петровна", "Люба Кузнецова")  # каталог, с отчеством
+    assert make_record.same_person("Кузнецова Любовь Аркадьевна", "Люба Кузнецова")  # каталог, с отчеством
     assert make_record.same_person("Кузнецова Люба", "Кузнецова Любовь")
     assert not make_record.same_person("Кузнецова Мария", "Люба Кузнецова")   # другое имя
     assert not make_record.same_person("Олег", "Олег Соколов")                # одно слово — не перевёрнутое имя
@@ -660,6 +660,15 @@ def test_year_from_course_name_not_upload_date(tmp_path):
     assert make_record.year_of("2024-08-01", course) == "2023"
     assert make_record.year_of("2024-08-01", talk) == "2024"
     assert make_record.year_of("2026-03-12", tmp_path / "records" / "flat") == "2026"
+
+
+def test_year_from_deep_course_tree(tmp_path):
+    """Дерево курса «ветка ▸ направление ▸ поток ▸ неделя»: год — у потока, а не у даты выкладки
+    и не у второго уровня (там направление без года)."""
+    rec = tmp_path / "records"
+    assert make_record.year_of("2026-06-16", rec / "Лекции" / "Курсы" / "QA" / "2025 осень" / "Неделя 01" / "x") == "2025"
+    assert make_record.year_of("2025-01-23", rec / "Лекции" / "Курсы" / "QA" / "2024" / "Неделя 03" / "x") == "2024"
+    assert make_record.year_of("2025-06-01", rec / "Лекции" / "Доклады" / "2024" / "x") == "2024"
 
 
 def test_header_carries_category_topics_year(tmp_path):

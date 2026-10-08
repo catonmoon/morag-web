@@ -54,7 +54,7 @@ class FakeRecord:
     title = "Kafka без боли: как мы пережили миграцию"
     date = "2026-03-12"
     group = "Backend-митап FTC #17"
-    speakers = ["Аня Петрова", "Пётр Аннин"]
+    speakers = ["Аня Соколова", "Пётр Аннин"]
 
 
 class FakeCorpus:
@@ -65,7 +65,7 @@ class FakeCorpus:
 def test_описание_записи_несёт_тайм_код_и_спикеров():
     title, description = meta.describe_record(FakeCorpus(), FakeRecord(), 1234)
     assert "20:34" in title, "без тайм-кода ссылка «на место» неотличима от ссылки на запись"
-    assert "Аня Петрова" in description
+    assert "Аня Соколова" in description
     assert "Backend-митап FTC #17" in description, "по митапу видно, о какой встрече речь"
 
 

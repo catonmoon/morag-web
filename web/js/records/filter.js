@@ -77,7 +77,8 @@ export function applyFilters(records, state) {
   for (const dim of MULTI) wanted[dim] = listOf(s[dim]);
   return records.filter((r) => {
     if (s.section && r.section !== s.section) return false;
-    if (s.sub && r.subgroup !== s.sub) return false;
+    // Подраздел — префикс пути: «Курсы» берёт и «Курсы/QA/2024/Неделя 03».
+    if (s.sub && r.subgroup !== s.sub && !String(r.subgroup || "").startsWith(`${s.sub}/`)) return false;
     if (s.year && yearOf(r) !== s.year) return false;
     if (s.speaker && !peopleOf(r).includes(s.speaker)) return false;
     // Множественный выбор: хотя бы одно из выбранных значений измерения есть у записи.
@@ -137,7 +138,9 @@ function valuesOf(record, dimension) {
   if (dimension === "year") return [yearOf(record)].filter(Boolean);
   if (dimension === "category") return [record.category].filter(Boolean);
   if (dimension === "topic") return record.topics || [];
-  if (dimension === "sub") return [record.subgroup].filter(Boolean);
+  // Чипы второго ряда — только ПЕРВЫЙ уровень под веткой: глубже (поток, неделя) — дерево,
+  // и сотня чипов «Курс/Поток/Неделя NN» была бы не осью, а свалкой.
+  if (dimension === "sub") return [String(record.subgroup || "").split("/")[0]].filter(Boolean);
   if (dimension === "tag") return record.tags || [];
   if (dimension === "speaker") return peopleOf(record);
   if (dimension === "kind") return record.kind || [];

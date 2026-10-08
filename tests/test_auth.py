@@ -64,10 +64,10 @@ class FakeDirectory:
             raise self.fail
         if login != "petrov" or password != "pw":
             raise local.BadCredentials()
-        return {"login": login, "provider": "ldap", "name": "Никанор Петров", "given": "Никанор", "surname": "Петров",
+        return {"login": login, "provider": "ldap", "name": "Никанор Соколов", "given": "Никанор", "surname": "Соколов",
                 "mail": "petrov@example.org",
                 "title": "инженер", "department": "платформа", "groups": list(self.groups),
-                "dn": f"CN=Никанор Петров,OU=people,DC=example,DC=org", "photo": PHOTO,
+                "dn": f"CN=Никанор Соколов,OU=people,DC=example,DC=org", "photo": PHOTO,
                 "raw": {"dn": "x", "sAMAccountName": [login]} if cfg.keep_raw_entry else None}
 
 
@@ -211,13 +211,13 @@ def test_вход_через_каталог_пишет_снимок_и_фото(
     r = login(c, "petrov")
     assert r.status_code == 200 and directory.calls == [("petrov", "pw")]
     me = r.json()
-    assert me["name"] == "Никанор Петров" and me["title"] == "инженер" and me["photo"] is True
+    assert me["name"] == "Никанор Соколов" and me["title"] == "инженер" and me["photo"] is True
     assert me["role"] == "admin", "группа из by_group даёт роль"
     users = tmp / "auth" / "users" / "ldap"
     snapshot = json.loads((users / "petrov.json").read_text(encoding="utf-8"))
     assert snapshot["groups"] == directory.groups and snapshot["department"] == "платформа"
-    assert snapshot["given"] == "Никанор" and snapshot["surname"] == "Петров"
-    assert me["speaker_name"] == "Никанор Петров"
+    assert snapshot["given"] == "Никанор" and snapshot["surname"] == "Соколов"
+    assert me["speaker_name"] == "Никанор Соколов"
     assert (users / "petrov.jpg").read_bytes() == PHOTO
     assert not (users / "petrov.raw.json").exists(), "сырая запись — только под флагом"
     photo = c.get("/api/auth/me/photo")
@@ -281,9 +281,9 @@ class FakeLdap3:
         self.binds: list[tuple[str, str]] = []
         self.searches: list[tuple[str, str, list]] = []
         self.accept = {"petrov@example.org": "pw", "cn=svc,dc=example,dc=org": "svc-pw",
-                       "CN=Никанор Петров,OU=people,DC=example,DC=org": "pw"}
-        self.entry = {"type": "searchResEntry", "dn": "CN=Никанор Петров,OU=people,DC=example,DC=org",
-                      "attributes": {"displayName": "Никанор Петров", "memberOf": [ADMIN_GROUP], "title": ["инженер"]},
+                       "CN=Никанор Соколов,OU=people,DC=example,DC=org": "pw"}
+        self.entry = {"type": "searchResEntry", "dn": "CN=Никанор Соколов,OU=people,DC=example,DC=org",
+                      "attributes": {"displayName": "Никанор Соколов", "memberOf": [ADMIN_GROUP], "title": ["инженер"]},
                       "raw_attributes": {"thumbnailPhoto": [PHOTO], "displayName": [b"\xd0\x9d"]}}
         self.found = True
         self.search_fails = False
@@ -341,7 +341,7 @@ def test_своей_учёткой_bind_по_шаблону_и_чтение_св
     who, filt, attrs = fake_ldap3.searches[0]
     assert who == "petrov@example.org" and filt == "(sAMAccountName=petrov)"
     assert "memberOf" in attrs and "*" not in attrs
-    assert profile["name"] == "Никанор Петров" and profile["groups"] == [ADMIN_GROUP]
+    assert profile["name"] == "Никанор Соколов" and profile["groups"] == [ADMIN_GROUP]
     assert profile["photo"] == PHOTO and profile["raw"] is None and profile["title"] == "инженер"
 
 
@@ -379,7 +379,7 @@ def test_сервисной_учёткой_search_then_bind(fake_ldap3):
     cfg.bind_dn, cfg.bind_password, cfg.keep_raw_entry = "cn=svc,dc=example,dc=org", "svc-pw", True
     profile = ldap_provider.authenticate(cfg, "petrov", "pw")
     assert fake_ldap3.binds == [("cn=svc,dc=example,dc=org", "svc-pw"),
-                                ("CN=Никанор Петров,OU=people,DC=example,DC=org", "pw")]
+                                ("CN=Никанор Соколов,OU=people,DC=example,DC=org", "pw")]
     assert fake_ldap3.searches[0][0] == "cn=svc,dc=example,dc=org" and fake_ldap3.searches[0][2] == ["*"]
     assert profile["raw"]["thumbnailPhoto"][0].startswith("base64:") and profile["raw"]["displayName"] == ["Н"]
     fake_ldap3.found = False

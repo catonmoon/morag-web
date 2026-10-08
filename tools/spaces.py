@@ -177,12 +177,40 @@ def sub_of(event: str, tags: list[str] | None = None, date: str = "",
     берётся он. Общего поля шапки под это нет и заводить его нельзя: шапка уезжает в payload
     КАЖДОГО чанка, а природа второго уровня у веток разная.
     """
+    return "/".join(sub_levels(event, tags, date, family))
+
+
+def sub_levels(event: str, tags: list[str] | None = None, date: str = "",
+               family: Path | None = None) -> tuple[str, ...]:
+    """Уровни под веткой, по одному каталогу на уровень.
+
+    Правило называет их строкой (`sub: "Python 2023"` — один уровень) или СПИСКОМ
+    (`sub: ["Курсы", "Python", "2023"]` — дерево курса: направление ▸ поток; элемент
+    `"{year}"` — год по дате записи). Список — явный
+    способ сказать «здесь несколько уровней»; косая черта внутри строки по-прежнему отказ
+    (`target_dir`), потому что лишний уровень из опечатки никто не заказывал.
+    Глубже правила (неделя, тема) запись кладёт человек или инструмент корпуса: правило решает,
+    где ПОТОК, и запись внутри потока на любой глубине считается лежащей на месте (`within`).
+    """
     rule = _rule_for(event, tags, family) or {}
-    named = str(rule.get("sub") or "").strip()
-    if named:
-        return named
+    named = rule.get("sub")
     year = str(date or "")[:4]
-    return year if year.isdigit() else ""
+    year = year if year.isdigit() else ""
+    if isinstance(named, (list, tuple)):
+        # «{year}» в списке — год по дате записи («Лекции CV ▸ 2025»); нет даты — нет и места.
+        levels = tuple(str(x).strip().replace("{year}", year) for x in named if str(x).strip())
+        if levels and all(levels):
+            return levels
+        return ()
+    if str(named or "").strip():
+        return (str(named).strip(),)
+    return (year,) if year else ()
+
+
+def within(record_dir: Path, base: Path, branch: str, levels: tuple[str, ...]) -> bool:
+    """Лежит ли запись внутри ветки и уровней правила — на любой глубине ниже них."""
+    want = base.joinpath(branch, *levels).resolve()
+    return want in record_dir.resolve().parents
 
 
 def roles_policy(branch: str, family: Path | None = None) -> dict:
@@ -242,16 +270,16 @@ def route(record_id: str, *, event: str, tags: list[str] | None = None,
     if found is not None:
         return found
     base = records_dir(space_of(event, tags, family), family)
-    branch, sub = branch_of(event, tags, family), sub_of(event, tags, date, family)
+    branch, levels = branch_of(event, tags, family), sub_levels(event, tags, date, family)
     # ⚠️ Ветка и второй уровень — ОДИН каталог каждый. Косая черта в имени («А/Б-тесты») молча
     # делает лишний уровень: ветка читается с диска как «А», роли ветки не находятся, а сайт и
     # индексатор видят раздел, которого никто не заводил (ловилось 04.10). Отказ, а не замена:
     # имя ветки видно людям, выбрать его должен человек.
-    for name in (branch, sub):
+    for name in (branch, *levels):
         if name and ("/" in name or "\\" in name):
             raise ValueError(f"имя ветки или раздела {name!r} с косой чертой — это лишний уровень "
-                             f"каталогов; переименуйте правило в hub.yml::routing")
-    return base / branch / sub / record_id if branch and sub else base / record_id
+                             f"каталогов; уровни задаются списком `sub: [...]` в hub.yml::routing")
+    return base.joinpath(branch, *levels, record_id) if branch and levels else base / record_id
 
 
 def corpus_root(path: Path) -> Path:

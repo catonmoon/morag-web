@@ -394,3 +394,31 @@ def test_routing_refuses_slash_in_branch_name(tmp_path: Path):
     (fam / "hub.yml").write_text(hub.replace("{b}", "Kafka и Postgres"), encoding="utf-8")
     got = spaces.route("2024-01-01-x", event="Курс", date="2024-01-01", family=fam)
     assert got.parts[-3:] == ("Kafka и Postgres", "2024", "2024-01-01-x")
+
+
+def test_routing_sub_as_list_makes_levels(tmp_path: Path):
+    """`sub: [..]` — несколько уровней под веткой (курс ▸ поток); запись глубже правила (неделя)
+    лежит на месте и правкой полей не выдёргивается."""
+    fam = tmp_path / "fam"
+    (fam / "spaces" / "talks" / "records").mkdir(parents=True)
+    (fam / "spaces" / "talks" / "site.yml").write_text("slug: talks\n", encoding="utf-8")
+    (fam / "names.json").write_text("{}", encoding="utf-8")
+    (fam / "hub.yml").write_text(
+        "spaces:\n  - slug: talks\n    dir: spaces/talks\n"
+        "routing:\n  - match: {event: \"Курс QA\"}\n    space: talks\n    branch: \"Лекции\"\n"
+        "    sub: [\"Курсы\", \"QA\", \"2025 весна\"]\n", encoding="utf-8")
+    got = spaces.route("2025-01-01-x", event="Курс QA", date="2025-01-01", family=fam)
+    assert got.parts[-5:] == ("Лекции", "Курсы", "QA", "2025 весна", "2025-01-01-x")
+    assert spaces.sub_of("Курс QA", family=fam) == "Курсы/QA/2025 весна"
+    root = fam / "spaces" / "talks" / "records"
+    deep = root / "Лекции" / "Курсы" / "QA" / "2025 весна" / "Неделя 01" / "2025-01-01-y"
+    deep.mkdir(parents=True)
+    levels = spaces.sub_levels("Курс QA", family=fam)
+    assert spaces.within(deep, root, "Лекции", levels)
+    assert not spaces.within(root / "Лекции" / "Курсы" / "QA" / "2024" / "z", root, "Лекции", levels)
+    (fam / "hub.yml").write_text(
+        "spaces:\n  - slug: talks\n    dir: spaces/talks\n"
+        "routing:\n  - match: {event: \"Доклады\"}\n    space: talks\n    branch: \"Лекции\"\n"
+        "    sub: [\"Доклады\", \"{year}\"]\n", encoding="utf-8")
+    assert spaces.sub_levels("Доклады", date="2025-03-01", family=fam) == ("Доклады", "2025")
+    assert spaces.sub_levels("Доклады", date="", family=fam) == ()
