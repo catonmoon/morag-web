@@ -17,6 +17,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from ..chat import answer_cache
 from ..chat.prompt import build_messages, compose_about_record, compose_question
 from ..chat.record_direct import CitationStream, build_context, load_screens
 from ..content.resolve import make_resolver, media_url
@@ -116,6 +117,40 @@ async def _direct_stream(state, messages: list[dict], norm: CitationStream):
                     norm.marks, norm.missed)
 
 
+def _replay(state, request, corpus, payload, question, ctx_meta, record, entry, answer_id, ip):
+    """Отдать сохранённый ответ тем же потоком кадров и записать в журнал с `cached: true`."""
+    started = time.monotonic()
+    media = media_url(record, corpus.slug, corpus.media_base)
+
+    async def stream() -> AsyncIterator[str]:
+        yield frames.encode(frames.answer_id(answer_id))
+        for frame in answer_cache.replay(entry, media):
+            yield frames.encode(frame)
+        await state.journal.write({
+            "type": "answer",
+            "corpus": corpus.slug,
+            "session_id": payload.session_id,
+            "answer_id": answer_id,
+            "question": question,
+            "context": ctx_meta,
+            "engine": "direct",
+            "cached": True,
+            "answer": entry["answer"],
+            "citations": [{"n": c["n"], "label": c["label"], "url": media, "rec": c["rec"],
+                           "sec": c["sec"]} for c in entry.get("citations") or []],
+            "status": "ok",
+            "duration_ms": int((time.monotonic() - started) * 1000),
+            "ip": ip,
+            "user": ({"login": user.login, "name": user.name}
+                     if (user := getattr(request.state, "user", None)) else None),
+        })
+        log.info("ответ %s: готовый (%s), цитат=%d", answer_id, record.id,
+                 len(entry.get("citations") or []))
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 @router.post("/ask")
 async def ask(request: Request, payload: AskRequest):
     state = request.app.state
@@ -184,6 +219,20 @@ async def ask(request: Request, payload: AskRequest):
 
     answer_id = secrets.token_urlsafe(12)  # непредсказуемый: по нему принимаем оценку
     ip = _client_ip(request, cfg.server.trusted_proxy_hops)
+
+    # Готовый ответ на кнопку-пресет (`chat/answer_cache.py`): только прямой путь, только первый
+    # вопрос разговора и только текст из конфига ветки. Отдаём ДО лимитов: ни LLM, ни слота он
+    # не занимает, и пять щелчков по готовым кнопкам не должны упираться в 429.
+    cache = None
+    if direct and not history and question in answer_cache.preset_questions(
+            corpus.chat, direct[1].section):
+        ctx_hash = answer_cache.context_hash(direct[0].system, state.record_direct.model)
+        cache = (corpus.index.path_of(direct[1]).parent, answer_cache.cache_key(ctx_hash, question),
+                 ctx_hash)
+        entry = answer_cache.load(cache[0], cache[1])
+        if entry:
+            return _replay(state, request, corpus, payload, question, ctx_meta, direct[1],
+                           entry, answer_id, ip)
 
     # Сначала квота посетителя, потом слот движка: 429 «слишком часто» честнее отдать
     # сразу, не занимая место в очереди на платный цикл.
@@ -268,6 +317,11 @@ async def ask(request: Request, payload: AskRequest):
                     status = "empty"
                     yield frames.encode(frames.error(NOTHING))
                     return
+                if cache and answer_cache.save(
+                        cache[0], cache[1], ctx_hash=cache[2], question=question,
+                        answer=norm.answer_text, citations=norm.citation_frames,
+                        model=state.record_direct.model):
+                    log.info("готовый ответ сохранён: %s — %s", direct[1].id, question[:60])
                 yield frames.encode(frames.done())
                 return
             try:

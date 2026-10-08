@@ -83,6 +83,9 @@
       "status": "edited",
       "sha256": "7d77c0892f10506ce732e286cefcdf41b681acc225d4df7501ddcfd1922e915e"
     },
+    "app/chat/answer_cache.py": {
+      "status": "ours"
+    },
     "app/chat/record_direct.py": {
       "status": "ours"
     },
@@ -299,6 +302,9 @@
       "status": "ours"
     },
     "tests/requirements.txt": {
+      "status": "ours"
+    },
+    "tests/test_answer_cache.py": {
       "status": "ours"
     },
     "tests/test_ask_api.py": {
