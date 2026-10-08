@@ -223,7 +223,7 @@ export function outline(records, { rest = "Общее" } = {}) {
   }
   const finish = (node) => {
     const kids = [...node.kids.values()].sort((a, b) => naturalCmp(a.name, b.name)).map(finish);
-    let leaves = [...node.leaves].sort((a, b) => naturalCmp(a.title || a.id, b.title || b.id));
+    let leaves = [...node.leaves].sort(leafCmp);
     if (kids.length && leaves.length) {
       const path = node.path ? `${node.path}/\u0000${rest}` : `\u0000${rest}`;
       kids.push({ name: rest, path, rest: true, kids: [], leaves, ...sums(leaves) });
@@ -237,6 +237,21 @@ export function outline(records, { rest = "Общее" } = {}) {
     };
   };
   return finish(root);
+}
+
+/**
+ * Порядок занятий в узле. Номер в начале ИМЕНИ ФАЙЛА — авторский порядок («1.Жизнь_QA_кто_мы»,
+ * «2.…»): название его часто теряет, а сравнение названий тогда ставит «зачем мы» перед «кто
+ * мы». Пронумерованные — по номеру и первыми, остальные — по названию.
+ */
+const fileNo = (r) => {
+  const m = /^(\d+)/.exec(String(r.media || "").split("/").pop() || "");
+  return m ? Number(m[1]) : Infinity;
+};
+function leafCmp(a, b) {
+  const na = fileNo(a), nb = fileNo(b);
+  if (na !== nb) return na - nb;
+  return naturalCmp(a.title || a.id, b.title || b.id);
 }
 
 const sums = (leaves) => ({

@@ -185,6 +185,16 @@ check("оглавление: дерево по пути, natural-порядок,
   assert.deepEqual(y2025.kids[2].leaves.map((r) => r.id), ["org"]);
 });
 
+check("оглавление: номер в имени файла — авторский порядок занятий", () => {
+  const recs = [
+    rec("z", "2025-01-01", { title: "Жизнь QA зачем мы", section: "Л", subgroup: "Р", media: "x/Р/3.Жизнь_QA_зачем_мы.mp4" }),
+    rec("k", "2025-01-01", { title: "Жизнь QA кто мы", section: "Л", subgroup: "Р", media: "x/Р/1.Жизнь_QA_кто_мы.mp4" }),
+    rec("i", "2025-01-01", { title: "Инструкция", section: "Л", subgroup: "Р", media: "x/Р/Инструкция.mp4" }),
+    rec("t", "2025-01-01", { title: "Жизнь QA какие мы", section: "Л", subgroup: "Р", media: "x/Р/10.Итоги.mp4" }),
+  ];
+  assert.deepEqual(outline(recs).kids[0].leaves.map((r) => r.id), ["k", "z", "t", "i"]);
+});
+
 check("оглавление включается конфигом, лента — `view=cards`; общая лента прячет feed_hide", () => {
   const reading = { outline: ["Л"], feed_hide: ["Л/Ролики"] };
   assert.equal(isOutline(state({ section: "Л" }), reading), true);
