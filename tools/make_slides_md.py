@@ -55,7 +55,16 @@ def read_header(md: Path) -> dict:
     for line in head.splitlines()[1:]:
         m = re.match(r"^([\w_]+):\s*(.*)$", line)
         if m:
-            out[m.group(1)] = m.group(2).strip()
+            value = m.group(2).strip()
+            # Строка в двойных кавычках — со снятым экранированием: папка архива «CI\CD» лежит в
+            # шапке как "…CI\\CD…", и путь с двойной косой уходил на сервер мимо файла (09.10:
+            # звук для голосов не вынимался). Кавычки вызывающие и так срезают — им всё равно.
+            if len(value) >= 2 and value[0] == value[-1] == '"':
+                try:
+                    value = json.loads(value)
+                except ValueError:
+                    pass
+            out[m.group(1)] = value
     return out
 
 
