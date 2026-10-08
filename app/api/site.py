@@ -134,7 +134,8 @@ async def records(request: Request, slug: str | None = None) -> dict:
                     for r in corpus.index.all()],
         # Направление чтения: общее и по разделам. Из данных его не вывести — курс читают
         # подряд, а митапы свежими сверху, и это решение владельца, а не свойство записей.
-        "reading": {"default": corpus.index.order, "sections": corpus.index.section_order},
+        "reading": {"default": corpus.index.order, "sections": corpus.index.section_order,
+                    "outline": getattr(corpus, "outline", []), "feed_hide": getattr(corpus, "feed_hide", [])},
         "indexed_at": indexed_at,
     }
 

@@ -140,7 +140,10 @@ const router = createRouter(
     },
     reader: (id, sec) =>
       renderReader(id, sec, {
-        onBack: () => router.go({ view: "home" }),
+        // «К записям» — шаг назад, если пришли со списка этого сайта: так возвращаются отбор,
+        // раскрытые узлы оглавления и место прокрутки (08.10: раньше вёл на главную с чистого
+        // листа, и из недели курса человек попадал в общую ленту). Пришли по ссылке — на главную.
+        onBack: () => router.back({ view: "home" }),
         onAsk: (recordId, at) => askAboutMoment(recordId, at),
         onShare: shareMoment,
         // Права — подсказки интерфейсу, рубеж на сервере: карандаш — право `edit`, карточка

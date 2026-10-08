@@ -12,7 +12,7 @@
 //   спасти: включаются КЛИКОМ по метке на карточке, где они и так нарисованы.
 
 /** Пустое состояние фильтров. `sort` пустой — «как решит раздел» (см. `sortFor`). */
-export const EMPTY = { section: "", sub: "", year: "", category: "", topic: "", tag: "", speaker: "", kind: "", q: "", sort: "" };
+export const EMPTY = { section: "", sub: "", year: "", category: "", topic: "", tag: "", speaker: "", kind: "", q: "", sort: "", view: "" };
 
 /**
  * Измерения с МНОЖЕСТВЕННЫМ выбором (владелец, 14.09: «нельзя выбрать несколько категорий»):
@@ -181,3 +181,65 @@ export function toQuery(state) {
 }
 
 export const isEmpty = (state) => Object.keys(EMPTY).every((k) => !(state[k] || "").trim());
+
+// --- оглавление -------------------------------------------------------------------------------
+//
+// Учебные ветки (курс ▸ поток ▸ неделя) читают по разделам, а не ищут по признаку: там список
+// показывается ДЕРЕВОМ по каталогам, которое сворачивается (владелец, 08.10). Какие ветки —
+// решает конфиг корпуса (`content.outline`); `view=cards` в адресе возвращает ленту.
+
+/** Показывать ли выбранную ветку оглавлением. */
+export const isOutline = (state, reading) =>
+  !!state.section && state.view !== "cards" && (reading?.outline || []).includes(state.section);
+
+/**
+ * Общая лента (раздел не выбран, поиска нет) не показывает пути из `feed_hide`: сотня коротких
+ * роликов одного курса, выложенных одним днём, заслонила бы всё остальное. В своей ветке и в
+ * поиске они видны.
+ */
+export function inFeed(record, state, reading) {
+  const hide = reading?.feed_hide || [];
+  if (!hide.length || state.section || (state.q || "").trim()) return true;
+  const path = [record.section, record.subgroup].filter(Boolean).join("/");
+  return !hide.some((p) => path === p || path.startsWith(`${p}/`));
+}
+
+/**
+ * Дерево ветки по пути подгруппы: `{name, path, count, sec, kids, leaves}`. Узлы — natural-
+ * порядком («Неделя 2» до «Неделя 10»); занятия внутри узла — по названию так же. Если в узле
+ * есть и подузлы, и свои занятия (организационное в корне потока), свои уходят в последний
+ * подузел `rest` — иначе они висели бы вперемешку с неделями.
+ */
+export function outline(records, { rest = "Общее" } = {}) {
+  const root = { name: "", path: "", kids: new Map(), leaves: [] };
+  for (const record of records) {
+    let node = root;
+    for (const name of String(record.subgroup || "").split("/").filter(Boolean)) {
+      const path = node.path ? `${node.path}/${name}` : name;
+      if (!node.kids.has(name)) node.kids.set(name, { name, path, kids: new Map(), leaves: [] });
+      node = node.kids.get(name);
+    }
+    node.leaves.push(record);
+  }
+  const finish = (node) => {
+    const kids = [...node.kids.values()].sort((a, b) => naturalCmp(a.name, b.name)).map(finish);
+    let leaves = [...node.leaves].sort((a, b) => naturalCmp(a.title || a.id, b.title || b.id));
+    if (kids.length && leaves.length) {
+      const path = node.path ? `${node.path}/\u0000${rest}` : `\u0000${rest}`;
+      kids.push({ name: rest, path, rest: true, kids: [], leaves, ...sums(leaves) });
+      leaves = [];
+    }
+    const own = sums(leaves);
+    return {
+      name: node.name, path: node.path, kids, leaves,
+      count: own.count + kids.reduce((n, k) => n + k.count, 0),
+      sec: own.sec + kids.reduce((s, k) => s + k.sec, 0),
+    };
+  };
+  return finish(root);
+}
+
+const sums = (leaves) => ({
+  count: leaves.length,
+  sec: leaves.reduce((s, r) => s + (r.duration_sec || 0), 0),
+});

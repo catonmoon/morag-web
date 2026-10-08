@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 const repo = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const {
   EMPTY, MULTI, applyFilters, facet, fromQuery, hasValue, isEmpty, listOf, sortFor, sortRecords,
-  subAxis, toQuery, withValue,
+  subAxis, toQuery, withValue, outline, isOutline, inFeed,
 } = await import(join(repo, "web/js/records/filter.js"));
 
 let failures = 0;
@@ -165,6 +165,36 @@ check("глубокое дерево: чип — первый уровень, ф
   assert.deepEqual(applyFilters(deep, state({ section: "Лекции", sub: "Курсы/QA/2024" })).map((r) => r.id), ["b"]);
   // «Курсы/QA/202» — не префикс уровня: «2024» не начинается с границы.
   assert.deepEqual(applyFilters(deep, state({ section: "Лекции", sub: "Курсы/QA/202" })), []);
+});
+
+check("оглавление: дерево по пути, natural-порядок, своё рядом с неделями — в «Общее»", () => {
+  const recs = [
+    rec("w10", "2025-01-01", { title: "Моки", section: "Л", subgroup: "QA/2025/Неделя 10", duration_sec: 60 }),
+    rec("w2", "2025-01-01", { title: "REST", section: "Л", subgroup: "QA/2025/Неделя 2", duration_sec: 120 }),
+    rec("org", "2025-01-01", { title: "Оргсобрание", section: "Л", subgroup: "QA/2025", duration_sec: 30 }),
+    rec("cv", "2024-01-01", { title: "Доклад", section: "Л", subgroup: "CV/2024", duration_sec: 10 }),
+  ];
+  const tree = outline(recs);
+  assert.equal(tree.count, 4);
+  assert.equal(tree.sec, 220);
+  assert.deepEqual(tree.kids.map((k) => k.name), ["CV", "QA"]);
+  const y2025 = tree.kids[1].kids[0];
+  assert.deepEqual(y2025.kids.map((k) => k.name), ["Неделя 2", "Неделя 10", "Общее"]);
+  assert.equal(y2025.leaves.length, 0);
+  assert.equal(y2025.kids[2].rest, true);
+  assert.deepEqual(y2025.kids[2].leaves.map((r) => r.id), ["org"]);
+});
+
+check("оглавление включается конфигом, лента — `view=cards`; общая лента прячет feed_hide", () => {
+  const reading = { outline: ["Л"], feed_hide: ["Л/Ролики"] };
+  assert.equal(isOutline(state({ section: "Л" }), reading), true);
+  assert.equal(isOutline(state({ section: "Л", view: "cards" }), reading), false);
+  assert.equal(isOutline(state({}), reading), false);
+  const clip = rec("c", "2025-01-01", { section: "Л", subgroup: "Ролики/Неделя 01" });
+  assert.equal(inFeed(clip, state({}), reading), false);
+  assert.equal(inFeed(clip, state({ section: "Л" }), reading), true);
+  assert.equal(inFeed(clip, state({ q: "mock" }), reading), true);
+  assert.equal(inFeed(rec("x", "2025-01-01", { section: "Л", subgroup: "Ролики2" }), state({}), reading), true);
 });
 
 console.log("адрес:");

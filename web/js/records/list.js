@@ -2,7 +2,8 @@
 //
 // Список ПЛОСКИЙ и по убыванию даты (решение владельца 10.09). Раздел, подраздел, год, метка и
 // спикер — это не заголовки, а ФИЛЬТРЫ: искать запись человек начинает с признака, а не с
-// прокрутки дерева. Отбор и сортировка — в `filter.js`, чтобы их проверял node-тест; здесь
+// прокрутки дерева. Исключение — учебные ветки (`content.outline`, владелец 08.10): курс читают
+// по разделам, и там список — оглавление-дерево по каталогам (см. «оглавление» ниже). Отбор и сортировка — в `filter.js`, чтобы их проверял node-тест; здесь
 // только рисование и связь с адресом.
 //
 // ⚠️ Состояние фильтров живёт В АДРЕСЕ (`?section=…&year=…`). Иначе отфильтрованным видом
@@ -15,8 +16,8 @@ import { drive as driveHalo, haloOptions, withoutShadow } from "../ui/halo.js";
 import { coverUrl, getFrames, getRecords } from "../api.js";
 import { fitBox } from "../ui/crop.js";
 import {
-  EMPTY, MULTI, SORTS, applyFilters, facet, fromQuery, hasValue, isEmpty, listOf, sortFor,
-  sortRecords, subAxis, withValue,
+  EMPTY, MULTI, SORTS, applyFilters, facet, fromQuery, hasValue, inFeed, isEmpty, isOutline, listOf,
+  outline, sortFor, sortRecords, subAxis, withValue,
 } from "./filter.js";
 
 let loaded = null;
@@ -24,7 +25,9 @@ let state = { ...EMPTY };
 let open = () => {};
 // Куда вернуть прокрутку, придя назад из записи. Ключ — адрес с фильтрами: вернуться на
 // прежнее место в ДРУГОМ отборе значит попасть в случайную точку чужого списка.
-let scrollMemo = { key: "", y: 0 };
+// `n` — сколько карточек было дорисовано: лента рисуется порциями, и вернуться на 120-ю карточку
+// можно, только дорисовав до неё (иначе прокрутка упрётся в конец первой порции).
+let scrollMemo = { key: "", y: 0, n: 0 };
 
 export async function renderRecords({ onOpen }) {
   open = onOpen;
@@ -65,7 +68,7 @@ function mountControls() {
  *  страницы, а не отматывал по одному нажатому чипу. */
 function set(patch, { keepFocus = false } = {}) {
   // Подраздел принадлежит разделу: сменили раздел — прежний курс к нему не относится.
-  if ("section" in patch && patch.section !== state.section) patch = { ...patch, sub: "" };
+  if ("section" in patch && patch.section !== state.section) patch = { ...patch, sub: "", view: "" };
   state = { ...state, ...patch };
   history.replaceState(history.state, "", location.pathname + query());  // state — глубина истории роутера
   paint({ keepFocus });
@@ -84,7 +87,7 @@ const query = () => {
 function paint({ restore = false, keepFocus = false } = {}) {
   const records = loaded.records;
   const sort = sortFor(state, loaded.reading);
-  const shown = sortRecords(applyFilters(records, state), sort);
+  const shown = sortRecords(applyFilters(records, state), sort).filter((r) => inFeed(r, state, loaded.reading));
   // ⚠️ Селект обязан показывать ДЕЙСТВУЮЩИЙ порядок, а не только выбранный руками: выбрав
   // курс, список сам разворачивается к первой лекции, и «сначала свежие» в селекте было бы
   // прямой ложью о том, что человек видит.
@@ -105,11 +108,158 @@ function paint({ restore = false, keepFocus = false } = {}) {
     : "";
 
   const list = $("#rec-list");
-  list.replaceChildren(...(shown.length ? shown.map(card) : [nothing()]));
-  markClamped(list);
+  const tree = isOutline(state, loaded.reading);
+  viewBar(tree, shown.length);
+  if (!shown.length) list.replaceChildren(nothing());
+  else if (tree) {
+    list.dataset.painted = "0";
+    list.replaceChildren(outlineView(shown));
+  }
+  else feed(list, shown, restore && memoMatches() ? scrollMemo.n : 0);
 
   if (keepFocus) $("#f-find").focus({ preventScroll: true });
   if (restore) restoreScroll();
+}
+
+// --- лента порциями ---------------------------------------------------------------------------
+//
+// Записей с видеолекциями — сотни (08.10), и рисовать все карточки разом с обложками незачем:
+// человек видит первые два десятка. Рисуем порцию, следующую — когда страж внизу ленты подходит
+// к экрану (автоподгрузка, а не страницы: страница сбрасывалась бы фильтром и требовала бы
+// номера в адресе). Отбор, счётчики и сортировка — по ВСЕМ записям, порциями только DOM.
+const CHUNK = 40;
+let feedRun = 0;
+
+function feed(list, shown, atLeast = 0) {
+  const run = ++feedRun;                 // новая отрисовка отменяет стража прежней
+  let painted = 0;
+  const sentinel = el("div", { class: "rec-sentinel", "aria-hidden": "true" });
+  const more = (want) => {
+    if (run !== feedRun) return;
+    const next = shown.slice(painted, Math.max(painted + CHUNK, want));
+    painted += next.length;
+    const nodes = next.map(card);
+    sentinel.before(...nodes);
+    markClampedNodes(nodes);
+    list.dataset.painted = String(painted);
+    if (painted >= shown.length) {
+      observer.disconnect();
+      sentinel.remove();
+    }
+  };
+  const observer = new IntersectionObserver((entries) => {
+    if (entries.some((e) => e.isIntersecting)) more(0);
+  }, { rootMargin: "1200px 0px" });
+  list.replaceChildren(sentinel);
+  more(atLeast);
+  if (sentinel.isConnected) observer.observe(sentinel);
+}
+
+// --- оглавление -------------------------------------------------------------------------------
+//
+// Учебная ветка — деревом по каталогам (курс ▸ поток ▸ неделя), узлы сворачиваются (владелец,
+// 08.10). Содержимое свёрнутого узла не рисуется, пока его не раскрыли: в дереве сотни строк.
+// Какие узлы открыты — помнит браузер (на устройство, не на всех); при поиске и фильтре дерево
+// уже сужено отбором, и всё найденное раскрыто.
+const OPEN_KEY = "morag.outline.open";
+let openPaths = new Set(readOpen());
+
+function readOpen() {
+  try { return JSON.parse(localStorage.getItem(OPEN_KEY) || "[]"); } catch { return []; }
+}
+function saveOpen() {
+  try { localStorage.setItem(OPEN_KEY, JSON.stringify([...openPaths])); } catch { /* без памяти */ }
+}
+
+function outlineView(shown) {
+  const tree = outline(shown);
+  const narrowed = PANEL_DIMS.some((d) => state[d]) || !!state.q.trim() || !!state.year || !!state.speaker;
+  const box = el("div", { class: "outline" });
+  paintSection(box, state.section);
+  const kids = tree.kids.length ? tree.kids : [];
+  // Узел первого уровня раскрыт по умолчанию — иначе ветка выглядит пустой строкой из трёх слов.
+  box.append(...kids.map((k) => outlineNode(k, 0, narrowed)), ...tree.leaves.map(outlineLeaf));
+  return box;
+}
+
+function outlineNode(node, depth, narrowed) {
+  const opened = narrowed || openPaths.has(node.path) || (depth === 0 && !openPaths.has(`!${node.path}`));
+  const details = el("details", { class: `ol-node${node.rest ? " ol-rest" : ""}` });
+  const summary = el("summary", {},
+    el("span", { class: "ol-name", text: node.name }),
+    el("span", { class: "ol-sum", text: `${node.count} · ${fmtHours(node.sec)}` }));
+  const body = el("div", { class: "ol-body" });
+  details.append(summary, body);
+  let filled = false;
+  const fill = () => {
+    if (filled) return;
+    filled = true;
+    body.append(...node.kids.map((k) => outlineNode(k, depth + 1, narrowed)), ...node.leaves.map(outlineLeaf));
+  };
+  details.addEventListener("toggle", () => {
+    if (details.open) fill();
+    if (narrowed) return;                 // раскрытие найденного — не выбор человека, не запоминаем
+    // У первого уровня по умолчанию «открыт», поэтому помним, что его ЗАКРЫЛИ («!путь»).
+    if (depth === 0) {
+      if (details.open) openPaths.delete(`!${node.path}`); else openPaths.add(`!${node.path}`);
+    } else if (details.open) openPaths.add(node.path); else openPaths.delete(node.path);
+    saveOpen();
+  });
+  if (opened) {
+    fill();
+    details.open = true;
+  }
+  return details;
+}
+
+function outlineLeaf(record) {
+  const row = el("button", { class: "ol-leaf", type: "button", title: record.title },
+    el("span", { class: "ol-play", text: "▶" }),
+    el("span", { class: "ol-title", text: record.title }),
+    record.duration_sec ? el("span", { class: "ol-dur", text: fmtDuration(record.duration_sec) }) : null);
+  // Обложка — при наведении, всплывашкой: в строке ей места нет, а узнают занятие по слайду.
+  if (record.cover) {
+    row.addEventListener("mouseenter", () => {
+      if (row.querySelector(".ol-cover")) return;
+      row.append(el("img", { class: "ol-cover", src: coverUrl(record.id, record.cover), alt: "", loading: "lazy" }));
+    }, { once: true });
+  }
+  row.addEventListener("click", () => {
+    rememberScroll();
+    open(record.id);
+  });
+  return row;
+}
+
+function fmtHours(sec) {
+  const min = Math.round((sec || 0) / 60);
+  return min >= 60 ? `${Math.floor(min / 60)} ч ${String(min % 60).padStart(2, "0")} мин` : `${min} мин`;
+}
+
+/** Строка над списком у ветки-оглавления: «развернуть всё / свернуть всё» и «карточки». */
+function viewBar(tree, count) {
+  let bar = $("#rec-view");
+  const can = !!state.section && (loaded.reading?.outline || []).includes(state.section);
+  if (!bar) {
+    bar = el("div", { class: "rec-view", id: "rec-view" });
+    $("#rec-list").before(bar);
+  }
+  bar.hidden = !can || !count;
+  if (bar.hidden) return;
+  const btn = (text, title, fn) => {
+    const b = el("button", { type: "button", class: "rec-view-btn", text, title });
+    b.addEventListener("click", fn);
+    return b;
+  };
+  const all = (open) => () => {
+    for (const d of document.querySelectorAll("#rec-list details.ol-node")) d.open = open;
+  };
+  bar.replaceChildren(...[
+    tree ? btn("развернуть всё", "Раскрыть все разделы", all(true)) : null,
+    tree ? btn("свернуть всё", "Свернуть все разделы", all(false)) : null,
+    btn(tree ? "карточками" : "оглавлением", tree ? "Показать лентой карточек" : "Показать деревом разделов",
+      () => set({ view: tree ? "cards" : "" })),
+  ].filter(Boolean));
 }
 
 // --- панель «ещё фильтры» --------------------------------------------------------------------
@@ -519,13 +669,16 @@ export function collapseFilters() {
 }
 
 export function rememberScroll() {
-  scrollMemo = { key: location.pathname + location.search, y: window.scrollY };
+  const painted = Number($("#rec-list")?.dataset.painted || 0);
+  scrollMemo = { key: location.pathname + location.search, y: window.scrollY, n: painted };
 }
+
+const memoMatches = () => scrollMemo.key === location.pathname + query() && scrollMemo.y > 0;
 
 /** Забыть место: возвращаясь к ПОЛЮ ВОПРОСА (с диалога, по кнопке в шапке), человек не
  *  хочет попасть в середину списка, откуда когда-то открыл запись. */
 export function forgetScroll() {
-  scrollMemo = { key: "", y: 0 };
+  scrollMemo = { key: "", y: 0, n: 0 };
 }
 
 function restoreScroll() {
@@ -555,8 +708,8 @@ function restoreScroll() {
 /** «… ››» — только у обрезанных аннотаций. Обрезку решает раскладка (ширина колонки, длина
  * заголовка), поэтому меряем после отрисовки: сперва ЧТЕНИЕ у всех (один пересчёт раскладки на
  * 190 карточек), потом запись — иначе чтение-запись вперемешку пересчитывало бы её на каждой. */
-function markClamped(root) {
-  const nodes = [...root.querySelectorAll(".rec-summary:not(.open)")];
+function markClampedNodes(cards) {
+  const nodes = cards.flatMap((c) => [...c.querySelectorAll(".rec-summary:not(.open)")]);
   const clipped = nodes.map((n) => n.scrollHeight > n.clientHeight + 1);
   nodes.forEach((n, i) => {
     const more = n.querySelector(".rec-more");

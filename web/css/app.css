@@ -119,6 +119,33 @@ body[data-view="signin"] #user-wrap{display:none}
 .rec-head h2{font-family:var(--serif);font-weight:700;font-size:26px;margin:0}
 .cnt{font-family:var(--mono);font-size:12px;color:var(--ink-faint);white-space:nowrap}
 .rec-list{display:flex;flex-direction:column;gap:10px;padding-bottom:30px}
+/* Лента порциями: страж внизу, к нему подходит прокрутка — дорисовываем следующую порцию. */
+.rec-sentinel{height:1px}
+/* Оглавление учебной ветки: дерево каталогов, узлы сворачиваются (владелец, 08.10). */
+.rec-view{display:flex;gap:8px;justify-content:flex-end;margin:0 0 6px}
+.rec-view[hidden]{display:none}
+.rec-view-btn{font:inherit;font-size:13px;background:none;border:1px solid var(--line);color:var(--ink-dim);border-radius:6px;padding:3px 10px;cursor:pointer}
+.rec-view-btn:hover{color:var(--ink);border-color:var(--accent)}
+.outline{display:flex;flex-direction:column;gap:2px;padding-bottom:30px}
+.ol-node>summary{display:flex;align-items:baseline;gap:10px;padding:6px 10px;border-radius:8px;cursor:pointer;list-style:none}
+.ol-node>summary::-webkit-details-marker{display:none}
+.ol-node>summary::before{content:"▸";color:var(--accent);width:12px;flex:none;transition:transform .15s}
+.ol-node[open]>summary::before{transform:rotate(90deg)}
+.ol-node>summary:hover{background:var(--accent-wash)}
+.outline>.ol-node>summary .ol-name{font-size:18px}
+.ol-name{font-weight:600;color:var(--ink)}
+.ol-rest>summary .ol-name{font-weight:400;font-style:italic;color:var(--ink-dim)}
+.ol-sum{margin-left:auto;color:var(--ink-faint);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.ol-body{margin-left:15px;padding-left:10px;border-left:1px solid var(--line-soft)}
+.ol-leaf{position:relative;display:flex;align-items:baseline;gap:10px;width:100%;text-align:left;font:inherit;color:var(--ink);background:none;border:0;border-radius:8px;padding:4px 10px;cursor:pointer}
+.ol-leaf:hover{background:var(--accent-wash)}
+.ol-play{color:var(--accent);font-size:10px;flex:none}
+.ol-title{flex:1;min-width:0}
+.ol-dur{color:var(--ink-faint);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.ol-cover{display:none;position:absolute;right:70px;bottom:100%;z-index:5;width:240px;border-radius:6px;box-shadow:0 6px 24px rgba(0,0,0,.25);pointer-events:none}
+.ol-leaf:hover .ol-cover{display:block}
+@media (hover:none){.ol-cover{display:none!important}}
+@media (max-width:600px){.ol-body{margin-left:6px;padding-left:6px}.outline>.ol-node>summary .ol-name{font-size:16px}}
 /* --- фильтры ---------------------------------------------------------------
  *
  * Фасеты РАЗНОЙ природы и выглядят по-разному: раздел (4 значения) и год (5) — чипами, их
