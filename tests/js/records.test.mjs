@@ -207,6 +207,19 @@ check("оглавление включается конфигом, лента �
   assert.equal(inFeed(rec("x", "2025-01-01", { section: "Л", subgroup: "Ролики2" }), state({}), reading), true);
 });
 
+check("чип считает то, что покажет щелчок: скрытое из ленты — только там, где оно видно", () => {
+  const reading = { feed_hide: ["Л/Ролики"] };
+  const recs = [
+    rec("a", "2025-01-01", { section: "Л", subgroup: "Ролики/Н1" }),
+    rec("b", "2025-01-01", { section: "Л", subgroup: "Курс" }),
+    rec("c", "2025-01-01", { section: "П", subgroup: "2025" }),
+  ];
+  const f = (s, d) => Object.fromEntries(facet(recs, state(s), d, reading));
+  assert.deepEqual(f({}, "section"), { Л: 2, П: 1 });   // раздел покажет и ролики
+  assert.deepEqual(f({}, "year"), { 2025: 2 });          // год без раздела — без роликов
+  assert.deepEqual(f({ section: "Л" }, "year"), { 2025: 2 });
+});
+
 console.log("адрес:");
 
 check("состояние уезжает в адрес и возвращается из него", () => {

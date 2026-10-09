@@ -87,24 +87,29 @@ const query = () => {
 function paint({ restore = false, keepFocus = false } = {}) {
   const records = loaded.records;
   const sort = sortFor(state, loaded.reading);
-  const shown = sortRecords(applyFilters(records, state), sort).filter((r) => inFeed(r, state, loaded.reading));
+  const matched = applyFilters(records, state);
+  const shown = sortRecords(matched, sort).filter((r) => inFeed(r, state, loaded.reading));
+  // Скрытое из общей ленты называем вслух — иначе сумма чипов разделов не бьётся со счётом.
+  const hidden = matched.filter((r) => !inFeed(r, state, loaded.reading));
   // ⚠️ Селект обязан показывать ДЕЙСТВУЮЩИЙ порядок, а не только выбранный руками: выбрав
   // курс, список сам разворачивается к первой лекции, и «сначала свежие» в селекте было бы
   // прямой ложью о том, что человек видит.
   $("#f-sort").value = sort;
 
-  chips($("#f-sections"), "section", facet(records, state, "section"), "все разделы");
+  chips($("#f-sections"), "section", facet(records, state, "section", loaded.reading), "все разделы");
   const subs = subAxis(records, state);
   const subsRow = $("#f-subs");
   subsRow.hidden = !subs.length;
-  if (subs.length) chips(subsRow, "sub", facet(records, state, "sub"), "весь раздел", subs);
+  if (subs.length) chips(subsRow, "sub", facet(records, state, "sub", loaded.reading), "весь раздел", subs);
   paintMore(records);
-  chips($("#f-years"), "year", facet(records, state, "year"), "все годы", null, true);
+  chips($("#f-years"), "year", facet(records, state, "year", loaded.reading), "все годы", null, true);
   active();
 
   const hours = Math.round(shown.reduce((sum, r) => sum + (r.duration_sec || 0), 0) / 3600);
+  const where = [...new Set(hidden.map((r) => r.section).filter(Boolean))].map((s) => `«${s}»`).join(", ");
   $("#rec-count").textContent = shown.length
     ? `${countOf(shown.length, "запись", "записи", "записей")} · ${countOf(hours, "час", "часа", "часов")}`
+      + (hidden.length ? ` · ещё ${hidden.length} — в разделе ${where}` : "")
     : "";
 
   const list = $("#rec-list");
@@ -289,12 +294,12 @@ function paintMore(records) {
   panel.hidden = !moreOpen;
   if (!moreOpen) return;
 
-  multiChips($("#f-cats"), "category", facet(records, state, "category"));
-  multiChips($("#f-kinds"), "kind", facet(records, state, "kind"));
+  multiChips($("#f-cats"), "category", facet(records, state, "category", loaded.reading));
+  multiChips($("#f-kinds"), "kind", facet(records, state, "kind", loaded.reading));
   // Темы — буква «М», метки — буква «О», рядом читаются как «МО» (владелец, 15.09); без
   // канваса (старый движок) — прежнее облако строками.
-  letterCloud($("#f-topics"), "topic", facet(records, state, "topic"), "М");
-  letterCloud($("#f-tags"), "tag", facet(records, state, "tag"), "О", { rareHidden: !rareTags, onRare: () => {
+  letterCloud($("#f-topics"), "topic", facet(records, state, "topic", loaded.reading), "М");
+  letterCloud($("#f-tags"), "tag", facet(records, state, "tag", loaded.reading), "О", { rareHidden: !rareTags, onRare: () => {
     rareTags = !rareTags;
     paint();
   } });

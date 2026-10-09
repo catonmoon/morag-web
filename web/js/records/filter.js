@@ -123,11 +123,15 @@ export function sortRecords(records, sort) {
  * Считаем без своего измерения намеренно: иначе у выбранного чипа стоит его число, а у всех
  * соседних ноль, и переключиться становится некуда — фильтр выглядит сломанным.
  */
-export function facet(records, state, dimension) {
+export function facet(records, state, dimension, reading = null) {
   const rest = { ...state, [dimension]: "" };
   const counts = new Map();
   for (const record of applyFilters(records, rest)) {
     for (const value of valuesOf(record, dimension)) {
+      // Число на чипе — ровно то, что покажет список после щелчка (08.10, «статистика не
+      // бьётся»): скрытое из общей ленты (`feed_hide`) считается, только если с этим значением
+      // оно станет видно — выбор раздела его показывает, выбор года без раздела нет.
+      if (reading && !inFeed(record, { ...state, [dimension]: value }, reading)) continue;
       counts.set(value, (counts.get(value) || 0) + 1);
     }
   }
