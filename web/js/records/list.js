@@ -87,10 +87,7 @@ const query = () => {
 function paint({ restore = false, keepFocus = false } = {}) {
   const records = loaded.records;
   const sort = sortFor(state, loaded.reading);
-  const matched = applyFilters(records, state);
-  const shown = sortRecords(matched, sort).filter((r) => inFeed(r, state, loaded.reading));
-  // Скрытое из общей ленты называем вслух — иначе сумма чипов разделов не бьётся со счётом.
-  const hidden = matched.filter((r) => !inFeed(r, state, loaded.reading));
+  const shown = sortRecords(applyFilters(records, state), sort).filter((r) => inFeed(r, state, loaded.reading));
   // ⚠️ Селект обязан показывать ДЕЙСТВУЮЩИЙ порядок, а не только выбранный руками: выбрав
   // курс, список сам разворачивается к первой лекции, и «сначала свежие» в селекте было бы
   // прямой ложью о том, что человек видит.
@@ -106,10 +103,8 @@ function paint({ restore = false, keepFocus = false } = {}) {
   active();
 
   const hours = Math.round(shown.reduce((sum, r) => sum + (r.duration_sec || 0), 0) / 3600);
-  const where = [...new Set(hidden.map((r) => r.section).filter(Boolean))].map((s) => `«${s}»`).join(", ");
   $("#rec-count").textContent = shown.length
     ? `${countOf(shown.length, "запись", "записи", "записей")} · ${countOf(hours, "час", "часа", "часов")}`
-      + (hidden.length ? ` · ещё ${hidden.length} — в разделе ${where}` : "")
     : "";
 
   const list = $("#rec-list");
