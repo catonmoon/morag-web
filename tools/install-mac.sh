@@ -219,6 +219,18 @@ CA="$ROOT/ca-bundle.pem"
 export CA
 "$VIDEO/bin/python" -c 'import certifi,sys; sys.stdout.write(open(certifi.where()).read())' > "$CA"
 security find-certificate -a -p /Library/Keychains/System.keychain >> "$CA" 2>/dev/null || true
+# ⚠️⚠️ Просроченные — вон. В связке корпоративного мака рядом с действующими центрами лежат их
+# прежние, ПРОСРОЧЕННЫЕ версии с теми же именами; OpenSSL ищет издателя сперва среди доверенных,
+# берёт просроченный и отвечает «certificate has expired», хотя действующий лежит рядом. Окно (через
+# `truststore`, macOS выбирает сама) при этом работает, а стадии с ИИ адаптера — нет: «Connection
+# error» за доли секунды, и до сайта не доходит ни один запрос (ловилось живьём).
+CA_ALL="$(mktemp -d)"
+awk -v d="$CA_ALL" '/BEGIN CERT/{n++} n{print > (d "/c" n ".pem")}' "$CA"
+: > "$CA"
+for f in "$CA_ALL"/c*.pem; do
+  if openssl x509 -in "$f" -noout -checkend 0 >/dev/null 2>&1; then cat "$f" >> "$CA"; fi
+done
+rm -rf "$CA_ALL"
 setenv SSL_CERT_FILE "$CA"
 setenv REQUESTS_CA_BUNDLE "$CA"
 if "$VIDEO/bin/python" -c "import ssl,urllib.request,os,sys
