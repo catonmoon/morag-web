@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import logging as applog
 from . import meta as ogmeta
-from .api import ask, auth as auth_api, edits, upload as upload_api, llm as llm_api, site, voices
+from .api import ask, auth as auth_api, edits, events as events_api, upload as upload_api, llm as llm_api, site, voices
 from .auth import AuthService, gate as auth_gate
 from .chat.record_direct import DirectAnswerer
 from .chat.topic import TopicMaker
@@ -30,6 +30,7 @@ from .content.upload import Staging
 from .content.rebuild import Rebuilder
 from .content.tokens import Tokens
 from .content.voices import Voices
+from .events import EventLog
 from .journal import Journal
 from .limits import ConcurrencyGate, RateLimiter
 
@@ -74,6 +75,15 @@ async def lifespan(app: FastAPI):
     app.state.default_corpus = corpora.get(default_slug) if default_slug else None
     app.state.gate = ConcurrencyGate(cfg.limits.max_concurrent_streams)
     app.state.journal = Journal(journal_path, enabled=cfg.journal.enabled)
+    # События просмотра — путь уже абсолютный (от файла конфига), но конфиг из кода может дать
+    # относительный: тогда от `app/`, как у журнала.
+    events_path = Path(cfg.events.path)
+    if not events_path.is_absolute():
+        events_path = (APP_DIR / events_path).resolve()
+    app.state.events = EventLog(events_path, enabled=cfg.events.enabled,
+                                flush_seconds=cfg.events.flush_seconds)
+    if cfg.events.enabled:
+        log.info("журнал событий просмотра включён: %s", events_path)
 
     # Вход: сессии, роли, снимки учёток. Каталог снимков — рядом с журналом, вне git и доставки.
     auth_dir = Path(cfg.auth.data_dir)
@@ -139,6 +149,7 @@ async def lifespan(app: FastAPI):
             await client.aclose()
         await app.state.topic.aclose()
         await app.state.record_direct.aclose()
+        app.state.events.close()
 
 
 def _web_root() -> Path | None:
@@ -166,6 +177,7 @@ def create_app() -> FastAPI:
     app.include_router(site.router)
     app.include_router(ask.router)
     app.include_router(voices.router)
+    app.include_router(events_api.router)
     app.include_router(edits.router)
     app.include_router(upload_api.router)
     # Шлюз LLM для расшифровки на чужом маке — под приёмом записи и его правом.

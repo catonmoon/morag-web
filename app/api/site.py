@@ -53,7 +53,9 @@ async def site(request: Request, slug: str | None = None) -> dict:
     # проверяет роль (или адрес, если авторизации нет). Спрятанная кнопка защитой не является.
     state = request.app.state
     return {**_corpus(request, slug).public(),
-            "editing": state.auth.capabilities(request, state.cfg.editing.enabled)["edit"]}
+            "editing": state.auth.capabilities(request, state.cfg.editing.enabled)["edit"],
+            # Слать ли события просмотра — флаг, и только он: что пишется, решает сервер.
+            "events": bool(getattr(getattr(state, "events", None), "enabled", False))}
 
 
 @router.get("/corpora")

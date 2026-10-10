@@ -34,6 +34,9 @@
     "app/api/edits.py": {
       "status": "ours"
     },
+    "app/api/events.py": {
+      "status": "ours"
+    },
     "app/api/llm.py": {
       "status": "ours"
     },
@@ -176,6 +179,9 @@
     "app/engine/sse.py": {
       "status": "verbatim",
       "sha256": "cb98d2aa9d21ad8b4805f21771be21e311b2375551b1c1b3c531690756a66104"
+    },
+    "app/events.py": {
+      "status": "ours"
     },
     "app/journal.py": {
       "status": "verbatim",
@@ -357,6 +363,9 @@
     "tests/test_engine.py": {
       "status": "edited",
       "sha256": "fd2489d1752a9f3108b4f03cc7b3dcb4940a4c9c3be4cf7110686c69a10bfdcd"
+    },
+    "tests/test_events.py": {
+      "status": "ours"
     },
     "tests/test_faststart.py": {
       "status": "ours"
@@ -750,6 +759,9 @@
     "web/js/ui/dom.js": {
       "status": "edited",
       "sha256": "94d0607531fe76272033d2bb08f5b103e0857360e80a089306e47aa8bac21807"
+    },
+    "web/js/ui/events.js": {
+      "status": "ours"
     },
     "web/js/ui/halo.js": {
       "status": "ours"

@@ -20,6 +20,7 @@ import { measureTopbar } from "./ui/topbar.js";
 import { initLogo, showMark } from "./ui/logo.js";
 import { mountMiniPlayer } from "./ui/miniplayer.js";
 import { initAnalytics, pageview, track } from "./ui/analytics.js";
+import { initEvents, emit as emitEvent, view as viewEvent } from "./ui/events.js";
 const ARROW =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>';
 
@@ -82,6 +83,7 @@ if (site) {
   document.title = hubData.hub.title || "Записи";
 }
 initAnalytics(site?.analytics || {});
+initEvents(Boolean(site?.events), site?.slug || "");
 mountUserMenu(me);
 // Знак — из бренда пространства, у витрины — её; форма входа получит свой от сервера входа.
 if (!onSignin) showMark(site?.brand || hubData?.hub || {});
@@ -180,6 +182,7 @@ addEventListener("morag:navigate", (event) => {
 // Одностраничник: переходы между экранами браузер счётчику не показывает —
 // шлём сами, из того же события навигации.
 addEventListener("morag:navigate", () => pageview());
+addEventListener("morag:navigate", (event) => viewEvent(event.detail));
 addEventListener("popstate", watchLeaveReader);
 addEventListener("morag:navigate", watchLeaveReader);
 
@@ -187,7 +190,10 @@ const chat = createChat({
   onOpenRecord: (id, sec) => router.go({ view: "reader", id, sec: Math.round(sec || 0) }),
   onShareMoment: shareMoment,
   // Только факт вопроса и корпус — ни текста, ни ответа.
-  onSend: () => track("ask", site?.slug || ""),
+  onSend: () => {
+    track("ask", site?.slug || "");
+    emitEvent("ask");
+  },
   // Ответ доехал, а человек уже вернулся на главную — кнопка прошлых разговоров обязана
   // появиться без перезагрузки.
   onSaved: () => curView === "home" && refreshPastButton(),

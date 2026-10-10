@@ -137,6 +137,20 @@ class JournalCfg(BaseModel):
     enabled: bool = True
 
 
+class EventsCfg(BaseModel):
+    """Журнал событий просмотра (`/api/events` → SQLite): что открывают, смотрят, где бросают.
+
+    По умолчанию ВЫКЛЮЧЕН: это сведения о людях, включает владелец сайта осознанно.
+    Зритель подписан HMAC логина ключом сайта (`derived_secret("events")`): уникальные зрители
+    и связь между днями без логина в базе. Отдел — открытым текстом, для срезов.
+    """
+    enabled: bool = False
+    path: str = "./data/events.sqlite"
+    department: bool = True        # писать отдел из каталога
+    flush_seconds: float = 3.0     # писатель копит пачку столько секунд
+    max_batch: int = 50            # событий в одном запросе браузера, лишнее отбрасывается
+
+
 class EditingCfg(BaseModel):
     """Правка корпуса со стороны сайта.
 
@@ -433,6 +447,7 @@ class AppConfig(BaseModel):
     record_direct: RecordDirectCfg = Field(default_factory=RecordDirectCfg)
     limits: LimitsCfg = Field(default_factory=LimitsCfg)
     journal: JournalCfg = Field(default_factory=JournalCfg)
+    events: EventsCfg = Field(default_factory=EventsCfg)
 
 
 # --- загрузка --------------------------------------------------------------
@@ -507,6 +522,8 @@ def _anchor(data: dict, base: Path) -> dict:
             fix(ref, "dir")
     if isinstance(data.get("journal"), dict):
         fix(data["journal"], "path")
+    if isinstance(data.get("events"), dict):
+        fix(data["events"], "path")
     if isinstance(data.get("auth"), dict):
         fix(data["auth"], "data_dir")
     limits = data.get("limits")
