@@ -726,6 +726,9 @@ function markClampedNodes(cards) {
   });
 }
 
+// Замок личной записи: одноцветный, рисуется `currentColor` — цветом рамки карточки.
+const LOCK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 10.5V8a4.5 4.5 0 0 1 9 0v2.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><rect x="4.5" y="10.5" width="15" height="10.5" rx="2.6" fill="currentColor"/><circle cx="12" cy="15.4" r="1.6" fill="var(--surface)"/><rect x="11.2" y="15.6" width="1.6" height="2.8" rx=".8" fill="var(--surface)"/></svg>';
+
 function card(record) {
   // На карточке — только ВЫСТУПАВШИЕ. Участники живут на странице записи: ведущий встречи
   // один и тот же на десятках карточек, и в списке это шум, а не признак.
@@ -792,8 +795,6 @@ function card(record) {
       el("div", { class: "rec-title" },
         // Отметка «лучшее» из источника корпуса — знаком, без пояснений: смысл задаёт корпус.
         record.award ? el("span", { class: "rec-award", text: "🏆", title: "Отмечено" }) : null,
-        // Личная запись — замком: её видят автор и те, кому он дал ссылку; в поиске её нет.
-        record.private ? el("span", { class: "rec-lock", text: "🔒", title: "Личная запись: видна вам и тем, кому вы дали ссылку" }) : null,
         record.title),
       summaryNode
     ),
@@ -801,6 +802,13 @@ function card(record) {
     // расшифровку скачивают со страницы записи. Место — тексту.
     sub
   );
+  // Личная запись — замок в правом верхнем углу, в цвет рамки (владелец, 17.10: «более явно»):
+  // её видят автор и те, кому он дал ссылку, в поиске её нет.
+  if (record.private) {
+    node.classList.add("private");
+    node.append(el("span", { class: "rec-lock", html: LOCK, title: "Скрытая запись — видна только вам и тем, кому вы дали ссылку. В общем списке и поиске её нет",
+                             "aria-label": "Личная запись" }));
+  }
   // Цвет ветки — рамкой карточки и всем, что внутри неё нарисовано акцентом (длительность).
   paintSection(node, record.section);
   node.addEventListener("click", () => {

@@ -315,7 +315,15 @@ body[data-view="signin"] #user-wrap{display:none}
 .rd-topics{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 /* Отметка «лучшее» — знаком перед заголовком, без подписи. */
 .rec-award{margin-right:6px}
-.rec-lock{margin-right:6px;font-size:.85em;opacity:.8}
+/* Замок личной записи — в правом верхнем углу карточки, цветом её рамки (и вместе с ней ярчает). */
+.rec-card.private{position:relative}
+.rec-card.private .rec-title{padding-right:26px}
+.rec-lock{position:absolute;top:12px;right:14px;width:18px;height:18px;display:block;cursor:help;
+  color:color-mix(in srgb,var(--accent) 42%,var(--line));transition:color .2s}
+.rec-lock svg{width:100%;height:100%;display:block}
+.rec-card.sec .rec-lock{color:color-mix(in srgb,var(--accent) 38%,var(--line))}
+.rec-card:hover .rec-lock{color:color-mix(in srgb,var(--accent) 42%,var(--line))}
+.rec-card.sec:hover .rec-lock{color:color-mix(in srgb,var(--accent) 85%,var(--line))}
 /* Формат записи — чип того же ряда, что метки, но своим цветом: это ось корпуса, а не тема. */
 .chip-kind{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
 /* Кадр и управление — один липкий блок: пока читаешь расшифровку, видео остаётся перед
