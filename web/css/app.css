@@ -326,6 +326,17 @@ body[data-view="signin"] #user-wrap{display:none}
   padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);
   font-size:12px;line-height:1.4;box-shadow:var(--shadow);opacity:0;visibility:hidden;pointer-events:none}
 .rec-lock:hover .rec-lock-tip{opacity:1;visibility:visible}
+/* Наведение — замок в полный цвет ветки; у автора он ещё и кнопка меню доступа. */
+.rec-card .rec-lock:hover,.rec-card .rec-lock.open{color:var(--accent)}
+.rec-lock.open .rec-lock-tip{opacity:0;visibility:hidden}
+.rec-lock-menu{position:absolute;top:calc(100% + 6px);right:-4px;z-index:6;display:flex;flex-direction:column;gap:2px;
+  min-width:200px;padding:6px;border-radius:10px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow)}
+.rec-lock-menu[hidden]{display:none}
+.rec-lock-item{font:inherit;font-size:13px;text-align:left;padding:7px 10px;border:none;border-radius:7px;background:transparent;color:var(--ink);cursor:pointer}
+.rec-lock-item:hover{background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.rec-lock-item:disabled{opacity:.5;cursor:default}
+.rec-lock-msg{font-size:12px;color:var(--accent);padding:0 10px;max-width:260px;overflow-wrap:anywhere}
+.rec-lock-msg:empty{display:none}
 .rec-card.sec .rec-lock{color:color-mix(in srgb,var(--accent) 38%,var(--line))}
 .rec-card:hover .rec-lock{color:color-mix(in srgb,var(--accent) 42%,var(--line))}
 .rec-card.sec:hover .rec-lock{color:color-mix(in srgb,var(--accent) 85%,var(--line))}
