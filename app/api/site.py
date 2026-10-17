@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from ..config import engine_for
 from ..content import attachments, words
+from . import access as access_api
 
 router = APIRouter(prefix="/api", tags=["site"])
 
@@ -39,11 +40,10 @@ def _corpus(request: Request, slug: str | None = None):
     return request.app.state.default_corpus
 
 
-def _meta(corpus, record_id: str):
-    meta = corpus.index.by_id(record_id)
-    if meta is None:
-        raise HTTPException(404, "нет такой записи")
-    return meta
+def _meta(request: Request, corpus, record_id: str):
+    """Запись по id — если смотрящему её видно (личная чужому — тот же 404, что «нет записи»).
+    Все ручки одной записи идут через эту заслонку, поэтому доступ решается в одном месте."""
+    return access_api.visible_or_404(request, corpus, record_id)
 
 
 @router.get("/site")
@@ -54,6 +54,9 @@ async def site(request: Request, slug: str | None = None) -> dict:
     state = request.app.state
     return {**_corpus(request, slug).public(),
             "editing": state.auth.capabilities(request, state.cfg.editing.enabled)["edit"],
+            # Личные записи: показывать ли тумблер доступа и ссылку — подсказка интерфейсу,
+            # право решает сервер (`app/api/access.py`).
+            "privacy": bool(state.cfg.privacy.enabled),
             # Слать ли события просмотра — флаг, и только он: что пишется, решает сервер.
             "events": bool(getattr(getattr(state, "events", None), "enabled", False))}
 
@@ -79,8 +82,8 @@ async def corpora(request: Request) -> dict:
             "slug": slug,
             "title": brand.get("title") or slug,
             "tagline": brand.get("tagline") or "",
-            "records_count": len(corpus.index),
-            "hours": round(corpus.index.total_sec / 3600, 1),
+            "records_count": corpus.index.public_count(),
+            "hours": round(corpus.index.public_sec() / 3600, 1),
             "accent": ((corpus.theme or {}).get("tokens") or {}).get("accent") or "",
             "chat_enabled": bool((corpus.chat or {}).get("enabled", True)),
         })
@@ -129,11 +132,19 @@ async def records(request: Request, slug: str | None = None) -> dict:
     # загрузку), поэтому свежая или только что поправленная запись читается, но ещё не ищется.
     # Молчать об этом нельзя: человек решит, что поиск сломан.
     indexed_at = _indexed_at(request, corpus.slug)
+    # Только то, что смотрящему положено видеть в ЛЕНТЕ: общие и свои личные (`app/api/access.py`).
+    # Личная запись в поиск не идёт вовсе — «ждёт индексации» ей не показываем; видео — через сайт.
+    shown = access_api.visible_records(request, corpus)
+    viewer = access_api.viewer_of(request)
+    me = viewer.login if viewer else ""
     return {
         "corpus": corpus.slug,
-        "count": len(corpus.index),
-        "records": [{**r.to_dict(), **({"indexed": r.mtime <= indexed_at} if indexed_at else {})}
-                    for r in corpus.index.all()],
+        "count": len(shown),
+        "records": [{**r.to_dict(),
+                     **({"indexed": r.mtime <= indexed_at} if indexed_at and not r.private else {}),
+                     **({"media_url": access_api.media_url(corpus, r)} if r.private else {}),
+                     **({"mine": True} if me and r.owner == me else {})}
+                    for r in shown],
         # Направление чтения: общее и по разделам. Из данных его не вывести — курс читают
         # подряд, а митапы свежими сверху, и это решение владельца, а не свойство записей.
         "reading": {"default": corpus.index.order, "sections": corpus.index.section_order,
@@ -217,7 +228,7 @@ async def record_words(
     лишних килобайт на мобильном.
     """
     corpus = _corpus(request, slug)
-    meta = _meta(corpus, record_id)
+    meta = _meta(request, corpus, record_id)
 
     # путь ДО расшифровки: имя файла слов знает words.py (`record.md` → `record.words.json`),
     # и второго места, где это знание записано, быть не должно
@@ -238,7 +249,7 @@ async def record_words(
 async def record_transcript(request: Request, record_id: str, slug: str | None = None):
     """Расшифровка как есть — её и скачивает посетитель."""
     corpus = _corpus(request, slug)
-    meta = _meta(corpus, record_id)
+    meta = _meta(request, corpus, record_id)
     path = corpus.index.path_of(meta)
     if not path.is_file():
         raise HTTPException(404, "файл расшифровки не найден")
@@ -256,7 +267,7 @@ async def record_slides(request: Request, record_id: str, slug: str | None = Non
     Отдаём инлайн, а не файлом на скачивание: их смотрят прямо в браузере рядом с расшифровкой.
     """
     corpus = _corpus(request, slug)
-    meta = _meta(corpus, record_id)
+    meta = _meta(request, corpus, record_id)
     path = corpus.index.file_of(meta, meta.slides) if meta.slides else None
     if path is None:
         raise HTTPException(404, "у записи нет слайдов")
@@ -268,7 +279,7 @@ async def record_files(request: Request, record_id: str, slug: str | None = None
     """Материалы записи — список из меты, читается на каждый запрос: приложенный файл виден
     сразу, без пересборки индекса записей (тот следит за `record.md`, а мета меняется отдельно)."""
     corpus = _corpus(request, slug)
-    meta = _meta(corpus, record_id)
+    meta = _meta(request, corpus, record_id)
     allowed = request.app.state.cfg.editing.attachments_ext
     try:
         found = attachments.items(corpus.index.path_of(meta).parent, allowed)
@@ -284,7 +295,7 @@ async def record_file(request: Request, record_id: str, name: str, slug: str | N
     скачать: pptx браузер не показывает, а отдавать его «инлайн» значит получить мусор на экране.
     """
     corpus = _corpus(request, slug)
-    meta = _meta(corpus, record_id)
+    meta = _meta(request, corpus, record_id)
     allowed = request.app.state.cfg.editing.attachments_ext
     try:
         path = attachments.find(corpus.index.path_of(meta).parent, name, allowed)
@@ -308,7 +319,7 @@ async def record_frame(request: Request, record_id: str, name: str, slug: str | 
     Кэш — как у бренда: имя кадра постоянно, а сам кадр меняется при пересборке шкалы, поэтому
     «перепроверь», а не «на сутки»."""
     corpus = _corpus(request, slug)
-    meta = _meta(corpus, record_id)
+    meta = _meta(request, corpus, record_id)
     tail = name[len("slides/"):] if name.startswith("slides/") else ""
     if not tail or "/" in tail or not tail.endswith(".jpg"):
         raise HTTPException(404, "нет такого кадра")
@@ -340,7 +351,7 @@ async def record_frames(request: Request, record_id: str, slug: str | None = Non
     сырые кадры той же рамкой). Читается сайдкар по запросу — список записей от этого не пухнет."""
     import json
     corpus = _corpus(request, slug)
-    meta = _meta(corpus, record_id)
+    meta = _meta(request, corpus, record_id)
     path = corpus.index.file_of(meta, "record.slides.json")
     if path is None:
         return {"frames": [], "crop": None}
@@ -411,8 +422,8 @@ async def health(request: Request) -> dict:
     return {
         "status": "ok",
         "corpora": sorted(state.corpora),
-        "records": {slug: len(c.index) for slug, c in state.corpora.items()},
-        "hours": {slug: round(c.index.total_sec / 3600, 1) for slug, c in state.corpora.items()},
+        "records": {slug: c.index.public_count() for slug, c in state.corpora.items()},
+        "hours": {slug: round(c.index.public_sec() / 3600, 1) for slug, c in state.corpora.items()},
         # Куда ходит каждое пространство за ответом. Без этого «поиск молчит» приходится
         # выяснять сравнением конфигов на машине.
         "engines": {slug: c.cfg.base_url for slug, c in getattr(state, "engines", {}).items()},

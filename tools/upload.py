@@ -939,7 +939,7 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
              tags: list[str] | None = None, summary: str = "", slides: str | None = None,
              site: str | None = None, with_stack: bool = False, with_screen: bool = True,
              wait: bool = True, title_auto: bool = False, should_upload=None, rid: str = "",
-             attach: list[str] | None = None, discussion: str = "") -> str:
+             attach: list[str] | None = None, discussion: str = "", visibility: str = "") -> str:
     """Весь путь записи: расшифровка → экран → пакет на сайт. Общий для командной строки и для
     страницы (`upload_ui.py`) — шаги, возобновление и сообщения обязаны быть одни и те же.
 
@@ -1022,7 +1022,10 @@ def pipeline(video: Path, *, title: str, date: str, event: str = "", speakers: l
     manifest = {"title": title, "date": date, "event": event or "", "tags": tags,
                 "summary": summary or "", "speakers": speakers, "video": f"video.{ext}",
                 # «название подставилось само» — чтобы сервер знал, можно ли его переписать
-                "title_auto": bool(title_auto), "discussion": discussion}
+                "title_auto": bool(title_auto), "discussion": discussion,
+                # Кому видна: `private` — автору и по ссылке, `public` — всем. Пусто — решит сайт
+                # (`privacy.upload_default`); сайт без личных записей поле не читает.
+                **({"visibility": visibility} if visibility in ("private", "public") else {})}
     # ⚠️ Что именно уедет на сайт — ОДНИМ событием, перед самой отправкой. До этого подставленных
     # полей в окне не было вовсе: `field.auto` никто не разбирал, а состояние хранило только
     # введённое при старте — человек видел результат только строкой в свёрнутом логе.
@@ -1285,7 +1288,8 @@ def cmd_run(args: argparse.Namespace) -> int:
              tags=[t.strip() for t in (args.tags or "").split(",") if t.strip()],
              summary=args.summary or "", slides=args.slides, site=args.site,
              with_stack=args.stack, with_screen=not args.no_screen, wait=not args.no_wait,
-             attach=args.attach or [], discussion=args.discussion or "")
+             attach=args.attach or [], discussion=args.discussion or "",
+             visibility="public" if args.public else "private" if args.private else "")
     return 0
 
 
@@ -1332,6 +1336,10 @@ def main() -> int:
     p.add_argument("--attach", nargs="+", metavar="ФАЙЛ",
                    help="материалы: презентации, PDF, ноутбуки… (несколько через пробел)")
     p.add_argument("--discussion", help="ссылка на обсуждение записи (тред в мессенджере)")
+    seen = p.add_mutually_exclusive_group()
+    seen.add_argument("--public", action="store_true", help="запись видна всем (и пойдёт в поиск)")
+    seen.add_argument("--private", action="store_true",
+                      help="запись видна только вам и по ссылке (умолчание сайта, если не сказано)")
     p.add_argument("--site")
     p.add_argument("--no-screen", action="store_true", help="без экрана из видео (быстрее, но поиск не увидит слайды)")
     p.add_argument("--stack", action="store_true", help="поднять стек транскрибации перед работой и погасить после")

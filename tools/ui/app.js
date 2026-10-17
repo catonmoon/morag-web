@@ -516,6 +516,7 @@ id("go").onclick = async () => {
       event: id("event").value, speakers: id("speakers").value, tags: id("tags").value,
       summary: id("summary").value, stack: true, title_auto: !titleTouched,
       attach: materials.map((m) => m.path), discussion: id("discussion").value.trim(),
+      visibility: id("public").checked ? "public" : "private",
     });
     lastLogLen = -1;
     cursor = 0;
@@ -537,6 +538,7 @@ id("again").onclick = async () => {
   await api("/api/reset", {});
   picked = null; titleTouched = false; lastLogLen = -1;
   ["title", "speakers", "summary", "tags", "discussion"].forEach((x) => { id(x).value = ""; });
+  id("public").checked = false;
   materials = [];
   renderMaterials();
   resetDrop();

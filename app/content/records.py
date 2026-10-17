@@ -102,6 +102,15 @@ class RecordMeta:
     # ли документ» он смотрит по mtime). Нужен, чтобы показать в списке, доехала ли запись до
     # поиска: с 24.09 индексация идёт плановым прогоном, а не на каждую загрузку.
     mtime: float = field(default=0.0, compare=False)
+    # Доступ (`app/content/access.py`). `private` — запись лежит в личном корне
+    # (`records-private/<логин>/…`): видимость — это каталог, а не флаг, поэтому в индекс движка
+    # такая запись не попадает по построению. `owner` — логин автора (`record.meta.json` →
+    # `access.owner`, у личной без него — каталог логина), `granted` — кто открыл по ссылке,
+    # `link` — соль ключа ссылки (сменил — старые ссылки умерли). Соль наружу не уходит.
+    private: bool = field(default=False, compare=False)
+    owner: str = field(default="", compare=False)
+    granted: tuple[str, ...] = field(default=(), compare=False)
+    link: str = field(default="", compare=False)
 
     def to_dict(self) -> dict:
         return {
@@ -131,6 +140,8 @@ class RecordMeta:
             # имя кадра внутри каталога записи; адрес строит фронт (`coverUrl`), как у медиа
             "cover": self.cover,
             "blurb": self.blurb,
+            "private": self.private,
+            "owner": self.owner,
         }
 
 
@@ -158,12 +169,16 @@ class RecordIndex:
     """Все записи корпуса. Тела расшифровок сюда не грузим — только шапки."""
 
     def __init__(self, records_dir: Path | list[Path], *, group_by: str = "event",
-                 order: str = "desc", section_order: dict | None = None) -> None:
+                 order: str = "desc", section_order: dict | None = None,
+                 private_dir: Path | None = None) -> None:
         # Корней может быть несколько: раздел вправе жить в своём каталоге, чтобы НЕ ПОПАСТЬ в
         # индекс движка (`sources[].path` смотрит только на первый). Первый корень — основной.
         dirs = records_dir if isinstance(records_dir, (list, tuple)) else [records_dir]
         self.dirs = [Path(d) for d in dirs]
         self.dir = self.dirs[0]
+        # Личный корень — ОТДЕЛЬНО от `dirs`: всё, что смотрит на `dirs` (токены корпуса, поиск
+        # написаний), личных записей не видит. Под ним — каталоги логинов.
+        self.private_dir = Path(private_dir) if private_dir else None
         self.group_by = group_by
         # ⚠️ Порядок списка — доменное решение, а не вкус. Митапам нужен свежий сверху, курсу —
         # лекция 1 сверху: курс читают подряд, и «свежее сверху» разворачивает его задом наперёд.
@@ -188,7 +203,8 @@ class RecordIndex:
         # (`records/<ветка>/<год>/<id>/record.md`) — путь и есть иерархия, которую видит
         # движок. Шаблон на один уровень нашёл бы НОЛЬ записей, и отказ был бы ТИХИМ:
         # в логе «0 шт.», на сайте пусто, ошибок нет.
-        return sorted(f for d in self.dirs for f in d.glob(f"**/{RECORD_FILE}"))
+        roots = [*self.dirs, *([self.private_dir] if self.private_dir else [])]
+        return sorted(f for d in roots for f in d.glob(f"**/{RECORD_FILE}"))
 
     # Сайдкары, из которых берутся обложка и сводка. Их правят инструменты без касания
     # `record.md`, поэтому сторож свежести смотрит и на них — иначе новая обложка ждала бы рестарта.
@@ -204,10 +220,12 @@ class RecordIndex:
         return max(stamps, default=0.0)
 
     @staticmethod
-    def _sidecars(rec: Path) -> tuple[str, str]:
-        """(кадр обложки, текст сводки) из сайдкаров записи; битый JSON или чужой путь — пусто.
-        Кадр — только `slides/*.jpg` внутри каталога: имя уезжает во фронт и вернётся запросом."""
+    def _sidecars(rec: Path) -> tuple[str, str, dict]:
+        """(кадр обложки, текст сводки, блок доступа) из сайдкаров записи; битый JSON или чужой
+        путь — пусто. Кадр — только `slides/*.jpg` внутри каталога: имя уезжает во фронт и
+        вернётся запросом."""
         cover = blurb = ""
+        access: dict = {}
         try:
             data = json.loads((rec / "record.slides.json").read_text(encoding="utf-8"))
             frame = str((data.get("cover") or {}).get("frame") or "")
@@ -219,9 +237,10 @@ class RecordIndex:
         try:
             data = json.loads((rec / "record.meta.json").read_text(encoding="utf-8"))
             blurb = str((data.get("blurb") or {}).get("text") or "").strip()
+            access = data.get("access") if isinstance(data.get("access"), dict) else {}
         except (OSError, ValueError, AttributeError):
             pass
-        return cover, blurb
+        return cover, blurb, access
 
     def build(self) -> None:
         files = self._files()
@@ -237,7 +256,9 @@ class RecordIndex:
         self._items = items = self._sorted(items, self.order)
         self.total_sec = sum(r.duration_sec for r in items)
         self._by_id = {r.id: r for r in items}
-        self._by_path = {r.path: r for r in items}
+        # ⚠️ Личные — не по пути: `by_path` разрешает цитаты движка, а личной записи в индексе
+        # движка нет и быть не должно. Хвост её пути совпал бы с будущим общим — не путаем.
+        self._by_path = {r.path: r for r in items if not r.private}
         self._stamp = self._mtime_stamp(files)
         log.info("индекс записей: %d шт. из %s", len(items),
                  ", ".join(str(d) for d in self.dirs))
@@ -246,9 +267,25 @@ class RecordIndex:
         if len(self._by_id) != len(items):
             log.warning("повторяющиеся id записей между каталогами — часть скрыта")
 
+    def _private_root(self, path: Path) -> tuple[Path, str] | None:
+        """`(<личный корень>/<логин>, логин)` для файла личной записи, иначе None."""
+        if self.private_dir is None:
+            return None
+        try:
+            rel = path.relative_to(self.private_dir)
+        except ValueError:
+            return None
+        if len(rel.parts) < 3:  # <логин>/<id>/record.md — минимум
+            return None
+        return self.private_dir / rel.parts[0], rel.parts[0]
+
     def _root_of(self, path: Path) -> Path:
         """Корень, которому принадлежит файл. Относительный путь считается от него, иначе
-        `by_path` перестал бы совпадать с doc_id движка."""
+        `by_path` перестал бы совпадать с doc_id движка. У личной записи корень — каталог
+        логина: раздел и подраздел считаются так же, как будут считаться в `records/`."""
+        own = self._private_root(path)
+        if own is not None:
+            return own[0]
         for root in self.dirs:
             try:
                 path.relative_to(root)
@@ -306,9 +343,19 @@ class RecordIndex:
         # по годам БЕЗ единого правила в конфиге — ровно то, что нужно большинству пространств.
         group = axis_value(self.group_by, date, fm)
         tags = [str(t) for t in (fm.get("tags") or [])]
+        own = self._private_root(path)
+        if self.private_dir is not None and own is None:
+            try:
+                path.relative_to(self.private_dir)
+                log.warning("личная запись без каталога логина: %s — пропускаю", path)
+                return None
+            except ValueError:
+                pass
         root = self._root_of(path)
         section, subgroup = self._section_of(path, root)
-        cover, blurb = self._sidecars(path.parent)
+        cover, blurb, access = self._sidecars(path.parent)
+        granted = tuple(str(g.get("login") if isinstance(g, dict) else g).lower()
+                        for g in (access.get("granted") or []) if g)
         # ⚠️ Берём максимум по тем же файлам, по которым решает индексатор: сама расшифровка и
         # аннотации экрана (`updated_at` документа = max их mtime). Обложка и сводка живут в
         # других сайдкарах и поиска не меняют — включать их значило бы врать «не в индексе».
@@ -342,6 +389,12 @@ class RecordIndex:
             subgroup=subgroup,
             path=str(path.relative_to(root)),
             file=str(path),
+            private=own is not None,
+            # У личной хозяин — каталог, где она лежит (его не подделать правкой меты);
+            # у общей — `access.owner` (проставляет приём загрузки).
+            owner=(own[1] if own else str(access.get("owner") or "")).lower(),
+            granted=granted,
+            link=str(access.get("link") or ""),
         )
 
     def refresh_if_stale(self) -> None:
@@ -356,7 +409,16 @@ class RecordIndex:
         return len(self._items)
 
     def all(self) -> list[RecordMeta]:
+        """ВСЕ записи, включая личные. Наружу — только через фильтр доступа
+        (`app/api/access.py::visible_records`); здесь запроса и того, кто смотрит, нет."""
         return list(self._items)
+
+    def public_count(self) -> int:
+        """Сколько общих записей — для счётчиков витрины: число чужих личных тоже сведение."""
+        return sum(1 for r in self._items if not r.private)
+
+    def public_sec(self) -> int:
+        return sum(r.duration_sec for r in self._items if not r.private)
 
     def by_id(self, record_id: str) -> RecordMeta | None:
         return self._by_id.get(record_id)

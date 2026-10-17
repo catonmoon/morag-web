@@ -111,7 +111,9 @@ def scan() -> dict:
     meta_names: dict[str, list[dict]] = {}
     intros: dict[str, list[dict]] = defaultdict(list)
 
-    for root in spaces.records_dirs():
+    # Личные записи — тоже: имя голоса обязано пересобрать и их. Снимок сайту отдаёт фильтр
+    # видимости (`app/api/voices.py`), чужая личная запись в нём наружу не выходит.
+    for root in spaces.records_dirs(private=True):
         slug = root.parent.name
         # ⚠️ Рекурсивно: записи лежат по веткам и годам. Обход на один уровень отдавал бы ветки,
         # снимок голосов собрался бы ПУСТЫМ и не упал — а по нему правят имена всего корпуса.

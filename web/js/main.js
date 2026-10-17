@@ -159,6 +159,7 @@ const router = createRouter(
         // Моменты экрана: лента под видео или метки на полосе плеера (site.yml `reader.frames`).
         frames: site?.reader?.frames || "strip",
         discussionLabel: site?.reader?.discussion_label || "обсуждение",
+        privacy: !!site?.privacy,
       }).catch(fail),
   },
   { getSlug: () => site?.slug || null }

@@ -12,7 +12,7 @@
 //   спасти: включаются КЛИКОМ по метке на карточке, где они и так нарисованы.
 
 /** Пустое состояние фильтров. `sort` пустой — «как решит раздел» (см. `sortFor`). */
-export const EMPTY = { section: "", sub: "", year: "", category: "", topic: "", tag: "", speaker: "", kind: "", q: "", sort: "", view: "" };
+export const EMPTY = { section: "", sub: "", year: "", category: "", topic: "", tag: "", speaker: "", kind: "", q: "", sort: "", view: "", mine: "" };
 
 /**
  * Измерения с МНОЖЕСТВЕННЫМ выбором (владелец, 14.09: «нельзя выбрать несколько категорий»):
@@ -76,6 +76,8 @@ export function applyFilters(records, state) {
   const wanted = {};
   for (const dim of MULTI) wanted[dim] = listOf(s[dim]);
   return records.filter((r) => {
+    // «Мои записи»: загруженные мной — личные и общие (`mine` ставит сервер по сессии).
+    if (s.mine && !r.mine) return false;
     if (s.section && r.section !== s.section) return false;
     // Подраздел — префикс пути: «Курсы» берёт и «Курсы/QA/2024/Неделя 03».
     if (s.sub && r.subgroup !== s.sub && !String(r.subgroup || "").startsWith(`${s.sub}/`)) return false;
@@ -203,7 +205,7 @@ export const isOutline = (state, reading) =>
  */
 export function inFeed(record, state, reading) {
   const hide = reading?.feed_hide || [];
-  if (!hide.length || state.section || (state.q || "").trim()) return true;
+  if (!hide.length || state.section || state.mine || (state.q || "").trim()) return true;
   const path = [record.section, record.subgroup].filter(Boolean).join("/");
   return !hide.some((p) => path === p || path.startsWith(`${p}/`));
 }

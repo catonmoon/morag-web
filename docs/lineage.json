@@ -24,6 +24,9 @@
       "status": "verbatim",
       "sha256": "40cecd335f31c0841de2c0e94290751d5112bff546152c0358b38b57eeb80bc5"
     },
+    "app/api/access.py": {
+      "status": "ours"
+    },
     "app/api/ask.py": {
       "status": "edited",
       "sha256": "9b011da67b8bcf515a5420827f20a2369094f4fc50b4d6d247918c28332e5ac9"
@@ -82,12 +85,12 @@
       "status": "verbatim",
       "sha256": "80ee9fdfbab17ef2aa8acf73ea31d4ee308bf305797b96ab6e251b5209719c15"
     },
+    "app/chat/answer_cache.py": {
+      "status": "ours"
+    },
     "app/chat/prompt.py": {
       "status": "edited",
       "sha256": "7d77c0892f10506ce732e286cefcdf41b681acc225d4df7501ddcfd1922e915e"
-    },
-    "app/chat/answer_cache.py": {
-      "status": "ours"
     },
     "app/chat/record_direct.py": {
       "status": "ours"
@@ -107,6 +110,9 @@
     "app/content/__init__.py": {
       "status": "edited",
       "sha256": "392c1a2cd3c3ecbe096b962d1ee8be6d02beb61899fc6f81ee1fd844fd13ea1b"
+    },
+    "app/content/access.py": {
+      "status": "ours"
     },
     "app/content/attachments.py": {
       "status": "ours"
@@ -310,6 +316,9 @@
     "tests/requirements.txt": {
       "status": "ours"
     },
+    "tests/test_access.py": {
+      "status": "ours"
+    },
     "tests/test_answer_cache.py": {
       "status": "ours"
     },
@@ -461,6 +470,9 @@
     "tests/test_words.py": {
       "status": "edited",
       "sha256": "40e1c7e963cf4b6ff0384bde44c53bd5dd6cee67d8798cb907a09265a6cbb70f"
+    },
+    "tools/access_backfill.py": {
+      "status": "ours"
     },
     "tools/degenerate.py": {
       "status": "ours"

@@ -220,8 +220,13 @@ def rubrics(record_dir: Path, family: Path) -> dict:
 
 
 def _root_of(record_dir: Path, family: Path) -> Path:
-    """Корень `records/` того пространства, где запись лежит сейчас."""
+    """Корень `records/` того пространства, где запись лежит сейчас.
+
+    У личной записи корень — каталог логина (`records-private/<логин>`): правка рубрики двигает
+    её внутри личного, а не вытаскивает в общее — «показать всем» делает только хозяин."""
     for parent in record_dir.parents:
+        if parent.parent.name == spaces.PRIVATE_DIR:
+            return parent
         if parent.name == "records":
             return parent
     return family / "records"

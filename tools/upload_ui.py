@@ -300,6 +300,7 @@ def start(fields: dict) -> dict:
                 tags=upload.as_list(fields.get("tags")),
                 summary=fields.get("summary") or "", slides=fields.get("slides") or None,
                 attach=upload.as_list(fields.get("attach")), discussion=fields.get("discussion") or "",
+                visibility=str(fields.get("visibility") or ""),
                 with_stack=bool(fields.get("stack", True)), with_screen=not fields.get("no_screen"),
                 wait=True, title_auto=bool(fields.get("title_auto")), rid=rid,
                 should_upload=lambda: bool(STATE.get("send", True)))

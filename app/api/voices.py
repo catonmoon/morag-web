@@ -77,6 +77,13 @@ def require(request: Request, need: str) -> None:
             raise HTTPException(403, "правка принимается только с этой машины")
 
 
+def _hidden(request: Request) -> set[str]:
+    """Личные записи, которых смотрящему не видно, — их следы снимок голосов наружу не отдаёт."""
+    from .access import private_ids, visible_ids  # noqa: PLC0415 — access импортирует ask
+    private = private_ids(request)
+    return private - visible_ids(request) if private else set()
+
+
 def _record_dirs(request: Request, ids: list[str]) -> dict[str, Path]:
     """id записи → её каталог. Ищем по индексам пространств: где лежит запись, знают они.
 
@@ -95,7 +102,7 @@ def _record_dirs(request: Request, ids: list[str]) -> dict[str, Path]:
 @router.get("/voices")
 async def voices(request: Request) -> dict:
     """Снимок голосов. Имена — из словаря, всё остальное — из снимка (см. Voices.public)."""
-    data = _voices(request).public()
+    data = _voices(request).public(hidden=_hidden(request))
     cfg = request.app.state.cfg
     data["editing"] = request.app.state.auth.capabilities(request, cfg.editing.enabled)["voices"]
     if not data["ready"]:
@@ -220,7 +227,7 @@ async def one(request: Request, voice: str, record: str = "") -> dict:
     в параметр. Читать можно всегда — смотреть, кто говорит, не правка; флаг отдаём, чтобы
     читалка знала, показывать ли поле ввода.
     """
-    data = _voices(request).one(voice, record.strip())
+    data = _voices(request).one(voice, record.strip(), hidden=_hidden(request))
     cfg = request.app.state.cfg
     data["editing"] = request.app.state.auth.capabilities(request, cfg.editing.enabled)["voices"]
     return data

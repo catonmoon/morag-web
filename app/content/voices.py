@@ -61,7 +61,18 @@ class Voices:
             self._stamp = stamp
         return self._data
 
-    def public(self) -> dict:
+    @staticmethod
+    def _hide(voice: dict, hidden: set[str]) -> dict:
+        """Голос без следов записей из `hidden` (чужие личные): где звучит, самопредставления и
+        кандидаты из меты — всё это сведения о записи. Секунды эфира остаются: число без записи."""
+        if not hidden:
+            return voice
+        return {**voice,
+                "records": [r for r in voice.get("records") or [] if r not in hidden],
+                "intros": [i for i in voice.get("intros") or [] if i.get("record") not in hidden],
+                "candidates": [c for c in voice.get("candidates") or [] if c.get("from") not in hidden]}
+
+    def public(self, hidden: set[str] | None = None) -> dict:
         """То, что уезжает в браузер. Имена берём из СЛОВАРЯ, а не из снимка.
 
         ⚠️ Снимок стареет: его собирают вручную, а словарь меняется на каждой правке. Показывать
@@ -70,16 +81,21 @@ class Voices:
         data = self.data()
         named, why = self.names()
         voices = []
+        hidden = hidden or set()
         for v in data.get("voices") or []:
+            v = self._hide(v, hidden)
+            if hidden and not v.get("records"):
+                continue  # голос звучит только в чужих личных — его в верстаке нет
             voices.append({**v, "name": named.get(v["id"], ""), "why": why.get(v["id"], "")})
         return {
             "ready": bool(data),
             "vocabulary": data.get("vocabulary") or sorted(set(named.values())),
-            "record_space": data.get("record_space") or {},
+            "record_space": {k: v for k, v in (data.get("record_space") or {}).items()
+                             if k not in hidden},
             "voices": voices,
         }
 
-    def one(self, voice: str, record: str = "") -> dict:
+    def one(self, voice: str, record: str = "", hidden: set[str] | None = None) -> dict:
         """Один голос — для правки ПРЯМО В ЧИТАЛКЕ, без похода в верстак.
 
         Отдаём только то, что нужно, чтобы назвать этот голос: сколько он звучит, как
@@ -92,6 +108,8 @@ class Voices:
         data = self.data()
         named, why = self.names()
         found = next((v for v in data.get("voices") or [] if v.get("id") == voice), None)
+        if found is not None:
+            found = self._hide(found, hidden or set())
         candidates = list((found or {}).get("candidates") or [])
         if record:
             свои = [c for c in candidates if c.get("from") == record]

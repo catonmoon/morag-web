@@ -228,6 +228,19 @@ export async function attachFile(id, file) {
 export const detachFile = (id, file) =>
   send(`/api/records/${encodeURIComponent(id)}/files/${String(file).split("/").map(encodeURIComponent).join("/")}`, "DELETE");
 
+// --- доступ к записи (личные записи, ссылка) ------------------------------------------------
+// Права — на сервере (`app/api/access.py`): хозяин и админ видят ключ ссылки и кто открыл.
+
+const accessPath = (id, tail = "") => `/api/records/${encodeURIComponent(id)}/access${tail}${q()}`;
+export const getAccess = (id) => getJSON(accessPath(id));
+/** `visibility`: `private` — только мне и по ссылке, `public` — всем (и в поиск). */
+export const setAccess = (id, visibility) => send(accessPath(id), "POST", { visibility });
+export const resetLink = (id) => send(accessPath(id, "/link/reset"), "POST", {});
+export const revokeAccess = (id, login) =>
+  send(accessPath(id, `/granted/${encodeURIComponent(login)}`), "DELETE");
+/** Открыл по ссылке — доступ закрепляется за вошедшим (запись появится у него в списке). */
+export const acceptLink = (id, k) => send(accessPath(id, "/accept"), "POST", { k });
+
 /** Снять все правки записи — обратимость это операция, а не обещание. */
 export const dropEdits = (id) =>
   send(`/api/records/${encodeURIComponent(id)}/edits`, "DELETE");

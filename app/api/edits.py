@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -75,10 +76,13 @@ def _store(request: Request):
 
 
 def _dir(request: Request, record_id: str):
-    dirs = _record_dirs(request, [record_id])
-    if record_id not in dirs:
-        raise HTTPException(404, f"записи {record_id} нет")
-    return dirs[record_id]
+    """Каталог записи — если правящему она видна. Чужая личная — 404, как и у читалки."""
+    from .access import can_see  # noqa: PLC0415
+    for corpus in request.app.state.corpora.values():
+        meta = corpus.index.by_id(record_id)
+        if meta is not None and can_see(request, meta):
+            return Path(meta.file).parent
+    raise HTTPException(404, f"записи {record_id} нет")
 
 
 @router.get("/tokens/{word}")

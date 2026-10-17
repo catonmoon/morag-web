@@ -178,8 +178,19 @@ async def ask(request: Request, payload: AskRequest):
     composed, ctx_meta, direct = question, None, None
     if payload.context:
         record = corpus.index.by_id(payload.context.record_id)
+        # Чужая личная — как будто её нет (тот же 404, что у читалки): её текст не уйдёт ни в
+        # контекст, ни в вопрос.
+        from .access import can_see  # noqa: PLC0415 — access импортирует ask
+        if record is not None and not can_see(request, record):
+            raise HTTPException(404, "нет такой записи")
         if record and payload.context.scope == "record":
             direct = _direct_context(state, corpus, record, history)
+        if record and record.private and payload.context.scope == "record" and not direct:
+            # Личной записи нет в индексе движка (каталог вне `sources[].path`): вопрос к ней —
+            # только прямым путём, запись целиком в окне модели. Не вышло — говорим почему, а не
+            # отправляем в движок, который честно ответит «такой записи нет».
+            raise HTTPException(409, "вопрос к личной записи не поместился в окно модели "
+                                     "(или прямой путь выключен) — сократите историю разговора")
         if direct:
             ctx_meta = {"record_id": record.id, "scope": "record"}
         elif record and payload.context.scope == "record":

@@ -264,5 +264,14 @@ check("адрес с несколькими значениями пережив�
   assert.deepEqual(fromQuery(toQuery(s)), s);
 });
 
+check("«мои записи» оставляют только свои и проходят мимо скрытых из ленты путей", () => {
+  const all = [rec("a", "2025-01-01", { mine: true, private: true, section: "Курс", subgroup: "Ролики" }),
+               rec("b", "2025-01-02", { mine: true }), rec("c", "2025-01-03")];
+  const s = state({ mine: "1" });
+  assert.deepEqual(applyFilters(all, s).map((r) => r.id).sort(), ["a", "b"]);
+  assert.ok(inFeed(all[0], s, { feed_hide: ["Курс/Ролики"] }), "свою запись лента не прячет");
+  assert.deepEqual(fromQuery(toQuery(s)).mine, "1", "отбор живёт в адресе");
+});
+
 console.log(failures ? `\n${failures} проверок упало` : "\nвсе проверки прошли");
 process.exit(failures ? 1 : 0);

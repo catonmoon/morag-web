@@ -315,6 +315,7 @@ body[data-view="signin"] #user-wrap{display:none}
 .rd-topics{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 /* Отметка «лучшее» — знаком перед заголовком, без подписи. */
 .rec-award{margin-right:6px}
+.rec-lock{margin-right:6px;font-size:.85em;opacity:.8}
 /* Формат записи — чип того же ряда, что метки, но своим цветом: это ось корпуса, а не тема. */
 .chip-kind{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
 /* Кадр и управление — один липкий блок: пока читаешь расшифровку, видео остаётся перед
@@ -1281,6 +1282,15 @@ body[data-view="chat"] .chat-tools{display:flex}
 .rec-summary.open .rec-more{position:static;display:inline;padding:0;margin-left:6px;background:none}
 /* Аннотация в читалке — целиком: сюда пришли читать, а не выбирать. */
 .rd-summary{color:var(--ink-dim);font-size:14px;line-height:1.55;margin:6px 0 0;max-width:70ch}
+/* Строка доступа личной записи — хозяину и админу: состояние, ссылка, «показать всем», кто открыл. */
+.rd-access{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:10px 0 0;font-size:13px;color:var(--ink-dim)}
+.rd-access-btn{font:inherit;font-size:12px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer}
+.rd-access-btn:hover{border-color:var(--accent)}
+.rd-access-btn:disabled{opacity:.5;cursor:default}
+.rd-access-who{display:inline-flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+.rd-access-person{display:inline-flex;align-items:center;gap:2px}
+.rd-access-person .rd-access-btn{padding:0 5px;border:none}
+.rd-access-msg{color:var(--accent)}
 
 /* Поля записи — в режиме правки, под шапкой. Правят то, из чего шапка собирается,
    поэтому форма живёт рядом с тем, что показывает, а не в отдельном углу. */

@@ -24,6 +24,12 @@ import yaml
 REPO = Path(__file__).resolve().parents[1]
 RECORD_FILE = "record.md"
 CORPUS_ENV = "MORAG_WEB_CORPUS"
+# Личные записи: `<пространство>/records-private/<логин>/<ветка>/<уровни>/<id>`. Под логином —
+# та же раскладка, что даёт `routing`, поэтому «показать всем» — это перенос в `records/` без
+# пересчёта места, а «скрыть» — обратно. ⚠️ Корень ВНЕ `sources[].path` индексатора по
+# построению: приватность — каталог, а не признак, и промах в признаке не может унести запись в
+# поиск. Видимость = где лежит файл; кто ещё видит (ссылка) — `record.meta.json` → `access`.
+PRIVATE_DIR = "records-private"
 
 _family: Path | None = None
 
@@ -130,13 +136,42 @@ def records_dir(slug: str, family: Path | None = None) -> Path:
     return space_dir(slug, family) / "records"
 
 
-def records_dirs(family: Path | None = None) -> list[Path]:
+def private_dir(slug: str, family: Path | None = None) -> Path:
+    """Корень личных записей пространства (`records-private/`), под ним — каталоги логинов."""
+    return space_dir(slug, family) / PRIVATE_DIR
+
+
+def records_dirs(family: Path | None = None, *, private: bool = False) -> list[Path]:
     """Все каталоги записей. Тем, кто ищет запись, обязаны быть известны ВСЕ.
 
     ⚠️ Инструмент, знающий про один каталог из шести, не падает — он молча считает запись
     неперенесённой и тащит её заново через конвейер. Ровно это уже ловили на двух записях.
+
+    `private` — добавить личные корни. По умолчанию НЕТ: генераторы отчётов и разметки корпуса
+    (классификатор, сводки) пишут свои файлы в git корпуса, и личная запись туда попасть не
+    должна. Личные видят те, кому они нужны по делу: поиск записи по id, полная пересборка,
+    снимок голосов (имя голоса пересобирает и личные записи, где он звучит).
     """
-    return [records_dir(s, family) for s in slugs(family)]
+    out = [records_dir(s, family) for s in slugs(family)]
+    if private:
+        out += [private_dir(s, family) for s in slugs(family)]
+    return out
+
+
+def is_private(path: Path) -> bool:
+    """Лежит ли путь в личном корне — по имени каталога, как `branch_for` ищет `records`."""
+    return PRIVATE_DIR in Path(path).resolve().parts
+
+
+def private_parts(path: Path) -> tuple[Path, str] | None:
+    """`(<space>/records-private/<логин>, логин)` для пути внутри личного корня, иначе None."""
+    parts = Path(path).resolve().parts
+    if PRIVATE_DIR not in parts:
+        return None
+    i = parts.index(PRIVATE_DIR)
+    if len(parts) <= i + 1:
+        return None
+    return Path(*parts[: i + 2]), parts[i + 1]
 
 
 def space_of(event: str, tags: list[str] | None = None, family: Path | None = None) -> str:
@@ -228,8 +263,10 @@ def find_record(record_id: str, family: Path | None = None) -> Path | None:
     ⚠️ Ищем рекурсивно: записи разложены по веткам и годам. Инструмент, который смотрит только на
     `records/<id>`, не падает — он молча считает запись неперенесённой и тащит её заново через
     конвейер. Ровно это уже ловили на двух записях одной ветки, когда корней стало шесть.
+
+    Личные корни — тоже: id один на корпус, и новая запись не должна занять id чужой личной.
     """
-    for root in records_dirs(family):
+    for root in records_dirs(family, private=True):
         if not root.is_dir():
             continue
         hit = next(root.glob(f"**/{record_id}/{RECORD_FILE}"), None)
@@ -242,7 +279,8 @@ def find_record(record_id: str, family: Path | None = None) -> Path | None:
     return None
 
 
-def record_dirs(marker: str = RECORD_FILE, family: Path | None = None) -> list[Path]:
+def record_dirs(marker: str = RECORD_FILE, family: Path | None = None, *,
+                private: bool = False) -> list[Path]:
     """Каталоги записей по всему корпусу, на любой глубине.
 
     Записью считается каталог, в котором лежит `marker` (по умолчанию `record.md`; сборщику нужен
@@ -251,7 +289,7 @@ def record_dirs(marker: str = RECORD_FILE, family: Path | None = None) -> list[P
     не падая. Пустой результат от такого обхода неотличим от «корпус пуст».
     """
     out: list[Path] = []
-    for root in records_dirs(family):
+    for root in records_dirs(family, private=private):
         if not root.is_dir():
             continue
         out.extend(sorted(hit.parent for hit in root.glob(f"**/{marker}")))
@@ -259,17 +297,22 @@ def record_dirs(marker: str = RECORD_FILE, family: Path | None = None) -> list[P
 
 
 def route(record_id: str, *, event: str, tags: list[str] | None = None,
-          date: str = "", family: Path | None = None) -> Path:
+          date: str = "", family: Path | None = None, owner: str = "") -> Path:
     """Куда класть НОВУЮ запись. Существующую не двигаем: у неё уже есть место.
 
     Раскладка — `records/<ветка>/<второй уровень>/<id>`, если у совпавшего правила есть `branch`
     и второй уровень известен (год из `date` либо названный правилом). Ветки нет в правиле —
     кладём плоско, как раньше: «ветка не решена» и «ветка пустая» обязаны различаться.
+
+    `owner` — логин: запись личная и ложится в `records-private/<логин>/…` той же раскладкой.
     """
     found = find_record(record_id, family)
     if found is not None:
         return found
-    base = records_dir(space_of(event, tags, family), family)
+    slug = space_of(event, tags, family)
+    base = records_dir(slug, family)
+    if owner:
+        base = private_dir(slug, family) / safe_owner(owner)
     branch, levels = branch_of(event, tags, family), sub_levels(event, tags, date, family)
     # ⚠️ Ветка и второй уровень — ОДИН каталог каждый. Косая черта в имени («А/Б-тесты») молча
     # делает лишний уровень: ветка читается с диска как «А», роли ветки не находятся, а сайт и
@@ -280,6 +323,38 @@ def route(record_id: str, *, event: str, tags: list[str] | None = None,
             raise ValueError(f"имя ветки или раздела {name!r} с косой чертой — это лишний уровень "
                              f"каталогов; уровни задаются списком `sub: [...]` в hub.yml::routing")
     return base.joinpath(branch, *levels, record_id) if branch and levels else base / record_id
+
+
+def public_target(record_dir: Path) -> Path:
+    """Куда переедет личная запись, став общей: тот же хвост пути под `records/`."""
+    found = private_parts(record_dir)
+    if found is None:
+        raise ValueError(f"{record_dir} не в личном корне")
+    base, _ = found
+    return base.parent.parent / "records" / Path(record_dir).resolve().relative_to(base)
+
+
+def private_target(record_dir: Path, owner: str) -> Path:
+    """Куда переедет общая запись, став личной `owner`: тот же хвост пути под его каталогом."""
+    path = Path(record_dir).resolve()
+    root = next((p for p in path.parents if p.name == "records"), None)
+    if root is None:
+        raise ValueError(f"{record_dir} не под records/")
+    return root.parent / PRIVATE_DIR / safe_owner(owner) / path.relative_to(root)
+
+
+LOGIN_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789._-")
+
+
+def safe_owner(login: str) -> str:
+    """Логин как имя каталога: строчными, только `[a-z0-9._-]`, без точек в начале.
+
+    ⚠️ Логин приходит из сессии, но становится частью ПУТИ — проверяем, а не верим: `..` или
+    косая черта увели бы запись за пределы личного корня."""
+    name = str(login or "").strip().lower()
+    if not name or name.startswith(".") or not set(name) <= LOGIN_CHARS:
+        raise ValueError(f"логин {login!r} не годится в имя каталога личных записей")
+    return name
 
 
 def corpus_root(path: Path) -> Path:

@@ -19,6 +19,9 @@ from pydantic import BaseModel, Field
 from .content.attachments import DEFAULT_EXT as DEFAULT_ATTACH_EXT
 from .content.records import RecordIndex
 
+# Совпадает с `tools/spaces.py::PRIVATE_DIR` (тест сверяет): сайт не тянет инструменты в импорт.
+PRIVATE_DIR = "records-private"
+
 # Имя продукта — ОДНО место: заголовок приложения, префикс переменных окружения, имя логгера.
 # Веб-морда generic и живёт отдельно от корпуса (публичный `morag-web`), имя сайта — из бренда
 # корпуса (`site.yml`/`hub.yml`), а не отсюда.
@@ -282,6 +285,33 @@ class UploadCfg(BaseModel):
     # `tools/auto_meta.py` первым шагом `after`, до индексации. Выключено по умолчанию: это
     # решение корпуса, а не платформы. Адрес и ключ шлюза берутся из `topic` и конфига движка.
     enrich: bool = False
+    # Видео ЛИЧНЫХ записей (`app/content/access.py`): каталог ВНЕ того, что раздаёт `media_base`
+    # (архив открыт без входа, а id угадывается по дате и названию). Под ним — тот же путь, что в
+    # шапке (`Uploads/<id>.mp4`): «показать всем» переносит файл в архив, шапка не меняется.
+    # Отдаёт сайт (`/api/records/<id>/media`) с проверкой доступа. Пусто — `<семья>/private-media`.
+    private_media: str = ""
+
+
+class PrivacyCfg(BaseModel):
+    """Личные записи: загрузить себе, дать ссылку, показать всем (17.10).
+
+    Скрывает личные записи от чужих сайт ВСЕГДА, независимо от флага: запись в личном корне
+    (`records-private/`) чужому не покажется и при выключенном флаге — безопасная сторона.
+    `enabled` включает то, что СОЗДАЁТ и РАЗДАЁТ личное: приём загрузки «себе», ручки доступа,
+    тумблер и ссылку в читалке. Выключено по умолчанию: платформа без входа о людях не знает.
+    ⚠️ Требует входа (`auth.enabled`): без него хозяина у записи нет.
+
+    `policy` — кто видит что (`app/content/access.py::POLICIES`); `upload_default` — что стоит в
+    окне загрузки, пока человек не выбрал: `private` (решение владельца сайта) или `public`.
+    """
+
+    enabled: bool = False
+    policy: str = "owner_link"
+    upload_default: str = "private"
+    # Команда индексации при СКРЫТИИ записи (общая → личная): индексатор удаляет из базы то, чего
+    # нет в источнике, и чем раньше прогон, тем короче окно, когда скрытое ещё находится поиском.
+    # Пусто — `upload.index`; пуст и он — запись уйдёт из поиска при плановом прогоне.
+    reindex: list[str] = Field(default_factory=list)
 
 
 class LdapCfg(BaseModel):
@@ -448,6 +478,7 @@ class AppConfig(BaseModel):
     limits: LimitsCfg = Field(default_factory=LimitsCfg)
     journal: JournalCfg = Field(default_factory=JournalCfg)
     events: EventsCfg = Field(default_factory=EventsCfg)
+    privacy: PrivacyCfg = Field(default_factory=PrivacyCfg)
 
 
 # --- загрузка --------------------------------------------------------------
@@ -539,6 +570,7 @@ def _anchor(data: dict, base: Path) -> dict:
         fix(data["upload"], "dir")
         fix(data["upload"], "archive")
         fix(data["upload"], "dist_dir")
+        fix(data["upload"], "private_media")
     return data
 
 
@@ -786,9 +818,12 @@ class Corpus:
         # Ось группировки — обычное строковое поле шапки. Имя поля в конфиге, потому что
         # доменное: у нас это митап (`event`), у другого корпуса — курс, отдел, релиз. Она
         # работает там, где записи лежат ПЛОСКО; где есть каталоги, разделы берутся с диска.
+        # Личный корень — соглашение (`records-private/`, `tools/spaces.py::PRIVATE_DIR`), а не
+        # строка конфига: его обязаны одинаково знать сайт, сборка и снимок голосов.
         self.index = RecordIndex(roots, group_by=str(content.get("group_by") or "event"),
                                  order=str(content.get("order") or "desc"),
-                                 section_order=content.get("section_order") or {})
+                                 section_order=content.get("section_order") or {},
+                                 private_dir=self.dir / PRIVATE_DIR)
         # Ветки, которые список показывает ОГЛАВЛЕНИЕМ (дерево по каталогам, сворачивается), а не
         # лентой карточек: учебные курсы читают по разделам, а не ищут по признаку. И пути,
         # которые общая лента (без выбранного раздела) не показывает: сотня коротких роликов
@@ -858,6 +893,8 @@ class Corpus:
             return cached
         seen: list[str] = []
         for record in self.index.all():
+            if record.private:  # уходит в LLM общей темы — личное туда не идёт
+                continue
             for value in [*record.tags, record.title]:
                 if value and value not in seen:
                     seen.append(value)
@@ -958,8 +995,8 @@ class Corpus:
                              if isinstance(v, str)},
                 "halo": halo_payload(self.theme),
             },
-            "records_count": len(self.index),
-            "hours": round(self.index.total_sec / 3600, 1),
+            "records_count": self.index.public_count(),
+            "hours": round(self.index.public_sec() / 3600, 1),
             # Не секрет: этот адрес и так уедет в каждый <video src>.
             "media_base": self.media_base,
             "chat_enabled": bool((self.chat or {}).get("enabled", True)),

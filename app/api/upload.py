@@ -89,8 +89,21 @@ def _tags(request: Request, limit: int = 200) -> list[str]:
     for corpus in request.app.state.corpora.values():
         corpus.index.refresh_if_stale()
         for meta in corpus.index.all():
+            if meta.private:  # метки чужой личной записи — тоже сведение о ней
+                continue
             seen.update(t for t in (meta.tags or []) if t)
     return [tag for tag, _ in seen.most_common(limit)]
+
+
+def _visibility(request: Request, raw: dict, owner: str) -> str:
+    """Куда ляжет запись. Личные выключены или автора нет (вход выключен) — общая, как раньше.
+    Поле не прислано (старое окно загрузки) — умолчание сайта (`privacy.upload_default`)."""
+    privacy = request.app.state.cfg.privacy
+    if not privacy.enabled or not owner:
+        return "public"
+    asked = str(raw.get("visibility") or "").strip()
+    return asked if asked in ("private", "public") else \
+        ("public" if privacy.upload_default == "public" else "private")
 
 
 @router.post("")
@@ -105,10 +118,13 @@ async def create(request: Request) -> dict:
                                  link_hosts=request.app.state.cfg.editing.discussion_hosts)
         user = request.app.state.auth.user_of(request)
         manifest.uploader = f"{user.name} ({user.login})" if user else "local"
+        manifest.owner = user.login.lower() if user else ""
+        manifest.visibility = _visibility(request, raw, manifest.owner)
         staging.create(manifest)
     except core.Refused as error:
         raise _refused(error)
-    log.info("загрузка %s начата: «%s», %s", manifest.record_id, manifest.title, manifest.uploader)
+    log.info("загрузка %s начата: «%s», %s, %s", manifest.record_id, manifest.title,
+             manifest.uploader, manifest.visibility)
     return {"id": manifest.record_id, "files": list(core.FILES), "video": manifest.video}
 
 
@@ -191,7 +207,7 @@ async def finish(request: Request, rid: str) -> dict:
             if any(m.id == rid for m in corpus.index.all()):
                 url = f"/{slug}/rec/{rid}"
         staging.set_status(rid, staging.status(rid)["state"], record=rid, url=url)
-        if cfg.index:
+        if cfg.index and staging.manifest(rid).visibility != "private":
             queue.submit(f"index:{rid}", partial(core.index, staging, rid, cfg=cfg, root=root, family=family))
 
     queued = queue.submit(f"upload:{rid}", job)

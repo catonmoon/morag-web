@@ -43,7 +43,7 @@ sys.path.insert(0, str(REPO / "tools"))
 import spaces  # noqa: E402
 from make_record import slugify  # noqa: E402
 
-from . import attachments  # noqa: E402
+from . import access, attachments  # noqa: E402
 
 SPEAKER_RE = re.compile(r"\bSpeaker_(\d+)\b")
 ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9-]{1,120}$")
@@ -87,6 +87,11 @@ class Manifest:
     # Ссылка на обсуждение записи (тред в мессенджере): ложится в `head.discussion` меты — туда,
     # где её не тронет пересборка меты.
     discussion: str = ""
+    # Доступ (17.10, `app/content/access.py`): `private` — запись ляжет в личный корень автора
+    # (`records-private/<логин>/…`), в поиск не пойдёт, видео — мимо открытого архива. `owner` —
+    # логин из СЕССИИ (не из манифеста: чужим логином назваться нельзя).
+    visibility: str = "public"
+    owner: str = ""
 
     def to_json(self) -> dict:
         return {k: v for k, v in self.__dict__.items()}
@@ -158,9 +163,13 @@ def validate(raw: dict, family: Path, *, link_hosts: list[str] | tuple[str, ...]
     rid = record_id(date, title)
     if not ID_RE.match(rid):
         raise Refused("из названия не вышло адреса записи — напишите его латиницей или кириллицей")
+    visibility = str(raw.get("visibility") or "").strip()
+    if visibility not in ("", "private", "public"):
+        raise Refused("видимость — private или public")
     return Manifest(title=title, date=date, event=event, tags=tags, summary=summary,
                     speakers=speakers, video=f"video.{ext}", record_id=rid,
-                    title_auto=bool(raw.get("title_auto")), discussion=discussion)
+                    title_auto=bool(raw.get("title_auto")), discussion=discussion,
+                    visibility=visibility or "public")
 
 
 def accept_name(name: str) -> bool:
@@ -463,7 +472,12 @@ async def accept(staging: Staging, rid: str, *, family: Path, cfg, root: Path,
             art.rename(src)
 
         media = ""
+        private = m.visibility == "private" and bool(m.owner)
         archive = Path(cfg.archive) if cfg.archive else None
+        if archive and private:
+            # ⚠️ Видео личной записи — НЕ в архив: архив раздаётся без входа, а id угадывается.
+            # Тот же относительный путь под своим корнем: «показать всем» — перенос файла.
+            archive = Path(cfg.private_media) if cfg.private_media else family / "private-media"
         if archive:
             ext = m.video.rsplit(".", 1)[-1]
             target = archive / cfg.video_dir / f"{rid}.{ext}"
@@ -491,6 +505,10 @@ async def accept(staging: Staging, rid: str, *, family: Path, cfg, root: Path,
             **({"head": {"discussion": m.discussion}} if m.discussion else {}),
             "sources": {"upload": {"by": m.uploader, "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                                    "title_from": "file" if m.title_auto else "author"}},
+            # Автор — структурно (раньше был только «Имя (логин)» строкой): по нему хозяин
+            # управляет доступом и у общей записи — может скрыть её позже.
+            **({"access": {"owner": m.owner,
+                           **({"link": access.new_salt()} if private else {})}} if m.owner else {}),
         }
         (d / f"{rid}.meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -502,6 +520,8 @@ async def accept(staging: Staging, rid: str, *, family: Path, cfg, root: Path,
         if m.summary:
             argv += ["--summary", m.summary]
         argv += ["--media", media] if media else ["--no-media"]
+        if private:
+            argv += ["--owner", m.owner]
         subst = {"artifact": str(src), "family": str(family), "record_dir": ""}
         out = await _run(argv, root, subst)
         record_dir = spaces.find_record(rid, family)
@@ -554,7 +574,9 @@ async def accept(staging: Staging, rid: str, *, family: Path, cfg, root: Path,
             if leftover.name not in ("manifest.json", "status.json", "done.json", "shift.json",
                                      "identity.json"):
                 leftover.unlink()
-        staging.set_status(rid, "indexing" if cfg.index else "done", record=str(record_dir.name))
+        # Личная в индекс не идёт (каталог вне `sources[].path`) — «индексация» ей не грозит.
+        staging.set_status(rid, "indexing" if cfg.index and not private else "done",
+                           record=str(record_dir.name), private=private)
         log.info("принята запись %s → %s (%s)", rid, record_dir, voice_note)
         return record_dir
     except Exception as error:
@@ -565,7 +587,7 @@ async def accept(staging: Staging, rid: str, *, family: Path, cfg, root: Path,
 
 async def index(staging: Staging, rid: str, *, cfg, root: Path, family: Path) -> None:
     """Индексация после приёма — командой из конфига; статус записи — по итогу."""
-    if not cfg.index:
+    if not cfg.index or staging.manifest(rid).visibility == "private":
         return
     try:
         await _run(cfg.index, root, {"family": str(family), "record_dir": "", "artifact": ""})

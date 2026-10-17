@@ -110,6 +110,11 @@ def branch_for(record_dir: Path) -> str | None:
     путём. Истина — там, где файл: её же видит индексатор движка.
     """
     parts = record_dir.resolve().parts
+    # Личная запись (`records-private/<логин>/<ветка>/…`): ветка — под логином. Та же ветка,
+    # что будет у неё в `records/`, поэтому «показать всем» не меняет шапку.
+    if spaces.PRIVATE_DIR in parts:
+        tail = parts[parts.index(spaces.PRIVATE_DIR) + 2:]
+        return tail[0] if len(tail) > 2 else None
     if "records" not in parts:
         return None
     tail = parts[parts.index("records") + 1:]
@@ -712,6 +717,8 @@ def main() -> int:
     ap.add_argument("--no-media", action="store_true", help="не переносить видео в media/")
     ap.add_argument("--media", help="имя (или путь внутри media/) видео, когда его нет локально")
     ap.add_argument("--dry", action="store_true", help="показать, что будет сделано")
+    ap.add_argument("--owner", default="",
+                    help="логин: новая запись личная и ложится в records-private/<логин>/…")
     # ⚠️ Пересборка ВСЕГО корпуса — операция, которую не стоит держать рукописным циклом в
     # истории команд: она трогает каждый record.md, а значит и mtime, по которому индексатор
     # решает «документ изменился». Пусть у неё будет имя и `--dry`.
@@ -724,7 +731,7 @@ def main() -> int:
             raise Fail("--all и указанный источник вместе не имеют смысла")
         # ⚠️ Рекурсивно и через общий помощник: записи лежат по веткам и годам, а обход
         # корней на один уровень видел бы ВЕТКИ и молча пересобирал ноль записей.
-        dirs = spaces.record_dirs("record.json")
+        dirs = spaces.record_dirs("record.json", private=True)
         if not dirs:
             raise Fail("не нашлось ни одной записи с сайдкаром — пересобирать не из чего")
         print(f"пересборка всего корпуса: {len(dirs)} записей"
@@ -783,7 +790,8 @@ def build_one(args, source: Path, changed_out: list | None = None) -> int:
             route_date = m.group(1) if m else ""
         record_dir = spaces.route(
             record_id, family=corpus, event=args.event or "", date=route_date,
-            tags=[t.strip() for t in (args.tags or "").split(",") if t.strip()])
+            tags=[t.strip() for t in (args.tags or "").split(",") if t.strip()],
+            owner=getattr(args, "owner", "") or "")
         old_head = {}
 
     x = json.loads(artifact.read_text(encoding="utf-8")).get("x_enriched")

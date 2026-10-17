@@ -94,6 +94,7 @@ function paint({ restore = false, keepFocus = false } = {}) {
   $("#f-sort").value = sort;
 
   chips($("#f-sections"), "section", facet(records, state, "section", loaded.reading), "все разделы");
+  mineChip($("#f-sections"), records);
   const subs = subAxis(records, state);
   const subsRow = $("#f-subs");
   subsRow.hidden = !subs.length;
@@ -544,6 +545,14 @@ function chips(row, dimension, counts, allLabel, order = null, descending = fals
   row.replaceChildren(...nodes);
 }
 
+/** «Мои записи» — первым в ряду разделов, и только у того, у кого они есть: свои личные и
+ *  общие, загруженные им. Число — при остальных фильтрах, как у соседних чипов. */
+function mineChip(row, records) {
+  if (!records.some((r) => r.mine)) return;
+  const count = applyFilters(records, { ...state, mine: "1" }).length;
+  row.prepend(chip("мои записи", count, !!state.mine, () => set({ mine: state.mine ? "" : "1" })));
+}
+
 function chip(label, count, on, onClick, section = "") {
   const node = el(
     "button",
@@ -783,6 +792,8 @@ function card(record) {
       el("div", { class: "rec-title" },
         // Отметка «лучшее» из источника корпуса — знаком, без пояснений: смысл задаёт корпус.
         record.award ? el("span", { class: "rec-award", text: "🏆", title: "Отмечено" }) : null,
+        // Личная запись — замком: её видят автор и те, кому он дал ссылку; в поиске её нет.
+        record.private ? el("span", { class: "rec-lock", text: "🔒", title: "Личная запись: видна вам и тем, кому вы дали ссылку" }) : null,
         record.title),
       summaryNode
     ),

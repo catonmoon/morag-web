@@ -19,7 +19,8 @@ from fastapi.staticfiles import StaticFiles
 
 from . import logging as applog
 from . import meta as ogmeta
-from .api import ask, auth as auth_api, edits, events as events_api, upload as upload_api, llm as llm_api, site, voices
+from .content.access import policy_for as access_policy_for
+from .api import access as access_api, ask, auth as auth_api, edits, events as events_api, upload as upload_api, llm as llm_api, site, voices
 from .auth import AuthService, gate as auth_gate
 from .chat.record_direct import DirectAnswerer
 from .chat.topic import TopicMaker
@@ -73,6 +74,8 @@ async def lifespan(app: FastAPI):
     app.state.upload = Staging(Path(cfg.upload.dir) if cfg.upload.dir else family / "incoming", family,
                                base=cfg.upload.speaker_base, step=cfg.upload.speaker_step)
     app.state.default_corpus = corpora.get(default_slug) if default_slug else None
+    # Кто видит личные записи — политика из конфига; незнакомое имя роняет старт, а не молчит.
+    app.state.privacy = access_policy_for(cfg.privacy.policy)
     app.state.gate = ConcurrencyGate(cfg.limits.max_concurrent_streams)
     app.state.journal = Journal(journal_path, enabled=cfg.journal.enabled)
     # События просмотра — путь уже абсолютный (от файла конфига), но конфиг из кода может дать
@@ -175,6 +178,7 @@ def _base_url(request: Request) -> str:
 def create_app() -> FastAPI:
     app = FastAPI(title=PRODUCT, docs_url=None, redoc_url=None, lifespan=lifespan)
     app.include_router(site.router)
+    app.include_router(access_api.router)
     app.include_router(ask.router)
     app.include_router(voices.router)
     app.include_router(events_api.router)

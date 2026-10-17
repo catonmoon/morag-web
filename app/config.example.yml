@@ -167,6 +167,18 @@ upload:
   # build: [python3, tools/make_record.py]
   # after: [[python3, tools/make_cover.py, "{record_dir}"], [python3, tools/voices.py, --scan]]
   # index: [docker, compose, -f, ../corpora/example/../../deploy/docker-compose.yml, --profile, tools, run, --rm, indexer, index]
+  # Видео ЛИЧНЫХ записей — вне того, что раздаёт media_base (архив открыт без входа). Тот же путь,
+  # что в шапке (Uploads/<id>.mp4); отдаёт сайт с проверкой доступа. Пусто — <семья>/private-media.
+  # private_media: /srv/private-media
+
+# Личные записи: загрузить себе, дать ссылку, показать всем (docs/privacy.md). Требует входа.
+# Запись в `records-private/<логин>/` чужим не показывается НИКОГДА — флаг включает то, что
+# создаёт и раздаёт личное: приём «себе», ссылку, тумблер на странице записи.
+privacy:
+  enabled: false
+  policy: owner_link          # хозяин + открывшие по ссылке; админ открывает по адресу, в ленте — нет
+  upload_default: private     # что в окне загрузки, пока не выбрали: private | public
+  # reindex: [bash, deploy/index.sh]   # индексация при скрытии записи (иначе — upload.index)
 
 auth:
   # Вход на сайт: форма + cookie. Выключено — сайт анонимный, как подкаст, и правка

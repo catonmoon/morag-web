@@ -12,7 +12,7 @@
 // ограничивает, так что элемент с `overflow:auto` просто растягивался бы, и
 // слежение за словом молча не работало (так и было в первой версии).
 import { $, countOf, el, fmt, fmtDate, fmtDuration, toast } from "../ui/dom.js";
-import { can, speakerName } from "../session.js";
+import { can, current as sessionUser, speakerName } from "../session.js";
 import { buildKaraoke, follower } from "../ui/karaoke.js";
 import { paintSection } from "../ui/theme.js";
 import { vttUrl } from "./subs.js";
@@ -23,7 +23,7 @@ import { fitBox } from "../ui/crop.js";
 import { cardLeft, markAt, marksOf, pickMark } from "./marks.js";
 import { coverUrl, getFrames, getRecords, getWords, transcriptUrl, slidesUrl, mediaUrl,
          getFiles, getRubrics, fileUrl, attachFile, detachFile, saveEdits, saveFields, promoteFix, getTokens, getVoicesQueue, getVoice,
-         renameVoice } from "../api.js";
+         renameVoice, getAccess, setAccess, resetLink, revokeAccess, acceptLink } from "../api.js";
 
 const PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
 const EXPAND =
@@ -64,6 +64,90 @@ async function findRecord(id) {
   return cache.records.find((r) => r.id === id) || null;
 }
 
+/** Ссылка на личную запись (`?k=…`): сперва закрепить доступ за вошедшим, потом искать запись в
+ *  списке — до принятия её там нет. Ключ из адреса убираем: им делятся, а не хранят в истории. */
+async function acceptShareKey(id) {
+  const key = new URLSearchParams(location.search).get("k");
+  if (!key) return null;
+  const url = new URL(location.href);
+  url.searchParams.delete("k");
+  history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+  try {
+    await acceptLink(id, key);
+    cache = null; // список прежний — без только что открытой записи
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Строка доступа для хозяина записи и админа (`privacy` пространства включён): личная ли,
+ *  ссылка, кто открывал, «показать всем» / «сделать личной». Остальным — ничего: сервер всё
+ *  равно ответил бы отказом. Подтверждение — вторым щелчком, без диалогов браузера. */
+function accessBar(meta) {
+  const me = sessionUser();
+  const login = String(me?.login || "").toLowerCase();
+  if (!(meta.private || meta.owner)) return null;
+  if (!(login && login === meta.owner) && me?.role !== "admin") return null;
+  const box = el("div", { class: "rd-access" }, el("span", { class: "rd-access-state", text: "…" }));
+  const msg = el("span", { class: "rd-access-msg" });
+  const button = (text, title, onClick) => {
+    const node = el("button", { class: "rd-access-btn", type: "button", text, title });
+    node.addEventListener("click", onClick);
+    return node;
+  };
+  const twice = (node, ask, run) => {
+    let armed = 0;
+    const text = node.textContent;
+    node.addEventListener("click", async () => {
+      if (Date.now() - armed > 4000) {
+        armed = Date.now();
+        node.textContent = ask;
+        setTimeout(() => { if (Date.now() - armed >= 4000) node.textContent = text; }, 4100);
+        return;
+      }
+      armed = 0;
+      node.disabled = true;
+      try { await run(); } catch (error) { msg.textContent = error.message; node.disabled = false; node.textContent = text; }
+    });
+    return node;
+  };
+  function paint(st) {
+    const nodes = [];
+    if (st.visibility === "private") {
+      const others = st.granted.length;
+      nodes.push(el("span", { class: "rd-access-state", text:
+        `🔒 Личная запись: видна ${login === st.owner ? "вам" : st.owner}${others ? ` и ещё ${others}` : ""}, в поиск не идёт` }));
+      nodes.push(button("Скопировать ссылку", "Ссылка откроется у тех, кто вошёл на сайт", async () => {
+        const link = `${location.origin}${location.pathname}?k=${st.key}`;
+        try { await navigator.clipboard.writeText(link); msg.textContent = "Ссылка скопирована"; }
+        catch { msg.textContent = link; }
+      }));
+      nodes.push(twice(button("Новая ссылка", "Старые ссылки перестанут открывать запись; кто уже открыл — останется"),
+        "Старые ссылки умрут — точно?", async () => { paint(await resetLink(meta.id)); msg.textContent = "Ссылка заменена"; }));
+      nodes.push(twice(button("Показать всем", "Запись появится в общем списке и после индексации — в поиске"),
+        "Точно показать всем?", async () => { await setAccess(meta.id, "public"); location.reload(); }));
+      if (others) {
+        nodes.push(el("span", { class: "rd-access-who" }, "Открывали: ",
+          ...st.granted.map((g) => {
+            const x = button("✕", `Убрать доступ: ${g.name || g.login}`, async () => paint(await revokeAccess(meta.id, g.login)));
+            return el("span", { class: "rd-access-person" }, g.name || g.login, x);
+          })));
+      }
+    } else {
+      nodes.push(el("span", { class: "rd-access-state", text: "Запись видна всем" }));
+      if (st.can_publish) {
+        nodes.push(twice(button("Сделать личной", "Запись уйдёт из общего списка и из поиска; видна будет вам и по ссылке"),
+          "Точно скрыть от всех?", async () => { await setAccess(meta.id, "private"); location.reload(); }));
+      }
+    }
+    nodes.push(msg);
+    box.replaceChildren(...nodes);
+  }
+  getAccess(meta.id).then(paint).catch(() => box.remove());
+  return box;
+}
+
 /** Строка людей записи: «Выступали: … · Участвовали: … · голосов N, названы M». */
 function peopleLine(meta) {
   const groups = [
@@ -97,6 +181,8 @@ export async function renderReader(id, sec = 0, {
   frames: framesMode = "strip",
   // Подпись ссылки на обсуждение — название мессенджера корпуса (site.yml `reader.discussion_label`).
   discussionLabel = "обсуждение",
+  // Личные записи включены у сайта (`privacy.enabled`): хозяину — строка доступа и ссылка.
+  privacy = false,
 } = {}) {
   const root = $("#reader");
 
@@ -109,9 +195,11 @@ export async function renderReader(id, sec = 0, {
   current?.dispose(); // ушли на ДРУГУЮ запись: снимаем подписки прежней
 
   root.replaceChildren(el("div", { class: "rec-sub", text: "Открываю запись…" }));
+  const shared = await acceptShareKey(id);
   const meta = await findRecord(id);
   if (!meta) {
-    root.replaceChildren(el("div", { class: "rec-sub", text: "Запись не найдена" }));
+    root.replaceChildren(el("div", { class: "rec-sub",
+      text: shared === false ? "Запись не найдена или ссылка устарела" : "Запись не найдена" }));
     return;
   }
   // Страница записи — в цвете её ветки (владелец, 14.09): токены акцента ставятся на корень
@@ -121,7 +209,8 @@ export async function renderReader(id, sec = 0, {
   paintSection(root, meta.section || meta.group);
   // Видео может не быть вовсе — например, у перенесённого с прежнего сайта анонса.
   // Тогда страница остаётся текстовой: расшифровка есть, играть нечего.
-  const src = mediaUrl(meta.media);
+  // Личная запись — видео через сайт с проверкой доступа (`media_url`), не из открытого архива.
+  const src = meta.media_url || mediaUrl(meta.media);
   const data = await getWords(id).catch(() => ({ aligned: false, turns: [] }));
 
   // --- шапка -------------------------------------------------------------
@@ -170,7 +259,8 @@ export async function renderReader(id, sec = 0, {
       : null,
     // Аннотация — целиком, без обрезки: сюда пришли читать, а не выбирать из списка. Где её нет —
     // краткое содержание по расшифровке (`blurb`), то же, что на карточке.
-    meta.summary || meta.blurb ? el("p", { class: "rd-summary", text: meta.summary || meta.blurb }) : null
+    meta.summary || meta.blurb ? el("p", { class: "rd-summary", text: meta.summary || meta.blurb }) : null,
+    privacy ? accessBar(meta) : null
   );
 
   // --- плеер (липкий: до паузы не надо мотать страницу вверх) -------------

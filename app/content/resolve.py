@@ -107,6 +107,11 @@ def media_url(meta, slug: str = "", base: str = "") -> str:
     медиа первого."""
     if not getattr(meta, "media", ""):
         return ""
+    if getattr(meta, "private", False):
+        # Видео личной записи — только через сайт, с проверкой доступа (`app/api/access.py`):
+        # открытый архив его не раздаёт. Та же форма, что `media_url` списка записей.
+        query = f"?slug={quote(slug)}" if slug else ""
+        return f"/api/records/{quote(meta.id)}/media{query}"
     # `quote` по умолчанию не трогает `/`, поэтому путь внутри архива остаётся путём,
     # а кириллица и пробелы в сегментах кодируются.
     path = quote(meta.media)
