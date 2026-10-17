@@ -188,7 +188,9 @@ async def finish(request: Request, rid: str) -> dict:
     except core.Refused as error:
         raise _refused(error)
     if status.get("state") == "done":
-        return {"id": rid, "state": "done", "record": status.get("record"), "url": status.get("url", "")}
+        done = {"id": rid, "state": "done", "record": status.get("record"), "url": status.get("url", "")}
+        _private_link(request, rid, done)
+        return done
     missing = staging.complete(rid)
     if missing:
         raise HTTPException(400, "не хватает: " + "; ".join(missing))
@@ -319,6 +321,31 @@ async def mirror_file(request: Request, token: str, name: str):
     return FileResponse(path, filename=name, media_type="application/octet-stream")
 
 
+def _private_link(request: Request, rid: str, out: dict) -> None:
+    """Личная запись: автору (и админу) — адрес С КЛЮЧОМ ссылки, чтобы окно загрузки сразу дало
+    чем поделиться; остальным — ни адреса, ни id.
+
+    ⚠️ Ключ НЕ хранится в статусе: статус читает любой с правом загрузки, а id загрузки угадывается
+    по дате и названию. Считаем на лету и только для того, кто вправе управлять записью."""
+    try:
+        private = request.app.state.upload.manifest(rid).visibility == "private"
+    except core.Refused:
+        return
+    if not private:
+        return
+    out["private"] = True
+    from .access import policy, viewer_of  # noqa: PLC0415
+    from ..content import access  # noqa: PLC0415
+    rec = next((c.index.by_id(rid) for c in request.app.state.corpora.values() if c.index.by_id(rid)), None)
+    if rec is None or not rec.private or not policy(request).can_manage(rec, viewer_of(request)):
+        out.pop("url", None)
+        out.pop("record", None)
+        return
+    key = access.link_token(request.app.state.auth.derived_secret("share"), rec.id, rec.link)
+    if out.get("url") and key:
+        out["url"] = f"{out['url']}?k={key}"
+
+
 @router.get("/{rid}")
 async def status(request: Request, rid: str) -> dict:
     staging = _staging(request)
@@ -327,6 +354,7 @@ async def status(request: Request, rid: str) -> dict:
     except core.Refused as error:
         raise _refused(error)
     out["queue"] = request.app.state.rebuilder.status()
+    _private_link(request, rid, out)
     # Когда запись попадёт в ПОИСК: сразу (сервер индексирует каждую) или позже, плановым
     # прогоном. Читается-то она сразу в любом случае — сайт берёт её с диска. Знать это должен
     # клиент: иначе он либо врёт «готово», либо заставляет ждать то, чего не будет.

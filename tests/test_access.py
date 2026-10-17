@@ -361,8 +361,17 @@ def test_an_upload_without_a_choice_lands_private_and_skips_the_index(intake):
     assert meta["access"]["owner"] == OWNER and meta["access"]["link"]
     assert not marker.exists(), "личная в индекс не идёт"
     assert rid in ids(c)
+    # Окну загрузки — адрес С КЛЮЧОМ (поделиться сразу), и только автору: ключ не хранится в
+    # статусе, который читает любой с правом загрузки.
+    mine = c.get(f"/api/upload/{rid}").json()
+    assert mine["private"] is True and "?k=" in mine["url"]
+    key = mine["url"].split("?k=", 1)[1]
     as_(c, STRANGER)
     assert rid not in ids(c)
+    theirs = c.get(f"/api/upload/{rid}").json()
+    assert "url" not in theirs and "record" not in theirs
+    assert c.post(f"/api/records/{rid}/access/accept", json={"k": key}).status_code == 200
+    assert rid in ids(c), "ключ из окна загрузки открывает запись"
 
 
 def test_an_upload_shown_to_everyone_lands_public_with_its_author(intake):

@@ -225,6 +225,8 @@ LAST_SEARCH = ""
 # Адрес принятой записи на сайте — его отдаёт сервер (`/<пространство>/rec/<id>`), сами не собираем:
 # пространство и id решает он. Окно показывает его кнопками «Открыть» и «Скопировать адрес».
 LAST_URL = ""
+# Запись приняли ЛИЧНОЙ: адрес выше — с ключом ссылки (его даёт сервер только автору).
+LAST_PRIVATE = False
 
 
 def client(site: str, cookies: dict[str, str], timeout=60.0) -> httpx.Client:
@@ -877,6 +879,7 @@ def upload(work: Path, site: str, cookies: dict[str, str], manifest: dict, files
                 say(f"готово: {site}{s.get('url') or ''}")
                 globals()["LAST_SEARCH"] = s.get("search") or ""
                 globals()["LAST_URL"] = f"{site}{s.get('url')}" if s.get("url") else ""
+                globals()["LAST_PRIVATE"] = bool(s.get("private"))
                 if s.get("search") == "later":
                     say("  (в поиске запись появится после ближайшей плановой индексации — обычно ночью)")
                 emit("upload.state", state="done", search=s.get("search") or "")

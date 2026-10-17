@@ -316,8 +316,13 @@ body[data-view="signin"] #user-wrap{display:none}
 /* Отметка «лучшее» — знаком перед заголовком, без подписи. */
 .rec-award{margin-right:6px}
 /* Замок личной записи — в правом верхнем углу карточки, цветом её рамки (и вместе с ней ярчает). */
-.rec-card.private{position:relative}
-.rec-card.private .rec-title{padding-right:26px}
+.rec-card.private,.rec-card.mine-open{position:relative}
+/* Своя общая запись: открытый замок — только при наведении на карточку и бледно: это действие, а
+   не признак (признак — у личной). */
+.rec-lock.unlocked{opacity:0;transition:opacity .15s,color .2s}
+.rec-card:hover .rec-lock.unlocked,.rec-lock.unlocked:focus-visible,.rec-lock.unlocked.open{opacity:.85}
+.rec-card .rec-lock.unlocked:hover,.rec-lock.unlocked.open{opacity:1}
+.rec-card.private .rec-title,.rec-card.mine-open .rec-title{padding-right:26px}
 .rec-lock{position:absolute;top:12px;right:14px;width:18px;height:18px;display:block;
   color:color-mix(in srgb,var(--accent) 42%,var(--line));transition:color .2s}
 .rec-lock svg{width:100%;height:100%;display:block}

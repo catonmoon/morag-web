@@ -307,6 +307,7 @@ def start(fields: dict) -> dict:
             site, _ = upload.load_session(None)
             sent = bool(STATE.get("send", True))
             STATE.update({"stage": "done", "finished": time.time(), "search": upload.LAST_SEARCH,
+                          "private": bool(getattr(upload, "LAST_PRIVATE", False)),
                           "sent": sent,
                           # ⚠️ Адрес — ОТ СЕРВЕРА (`upload.LAST_URL`): прежде он собирался из поля
                           # `slug`, которого в форме нет, и «Открыть запись» вела на корень сайта.

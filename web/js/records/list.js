@@ -727,6 +727,8 @@ function markClampedNodes(cards) {
   });
 }
 
+// Открытый замок — своя общая запись (дужка откинута вправо), тот же рисунок.
+const UNLOCK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 10.5V8a4.5 4.5 0 0 1 8.7-1.6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><rect x="4.5" y="10.5" width="15" height="10.5" rx="2.6" fill="currentColor"/><circle cx="12" cy="15.4" r="1.6" fill="var(--surface)"/><rect x="11.2" y="15.6" width="1.6" height="2.8" rx=".8" fill="var(--surface)"/></svg>';
 // Замок личной записи: одноцветный, рисуется `currentColor` — цветом рамки карточки.
 const LOCK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 10.5V8a4.5 4.5 0 0 1 9 0v2.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><rect x="4.5" y="10.5" width="15" height="10.5" rx="2.6" fill="currentColor"/><circle cx="12" cy="15.4" r="1.6" fill="var(--surface)"/><rect x="11.2" y="15.6" width="1.6" height="2.8" rx=".8" fill="var(--surface)"/></svg>';
 
@@ -734,12 +736,17 @@ const LOCK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 10.5V8a4
  *  карточке (владелец, 17.10): скопировать ссылку, показать всем. У остальных щелчок открывает
  *  запись, как вся карточка. Права решает сервер — меню лишь не предлагает заведомо чужого. */
 function lockOf(record) {
-  const tip = "Скрытая запись — видна только вам и тем, кому вы дали ссылку. В общем списке и поиске её нет";
+  const open = !record.private;   // своя ОБЩАЯ запись: открытый замок, «сделать личной»
+  const tip = open
+    ? "Запись видна всем. Нажмите — сделать личной: видна будет только вам и тем, кому дадите ссылку"
+    : "Скрытая запись — видна только вам и тем, кому вы дали ссылку. В общем списке и поиске её нет";
   const me = sessionUser();
   const manage = !!(record.mine || me?.role === "admin");
-  const lock = el("span", { class: `rec-lock${manage ? " can" : ""}`, html: LOCK, role: manage ? "button" : "img",
+  const lock = el("span", { class: `rec-lock${manage ? " can" : ""}${open ? " unlocked" : ""}`,
+                            html: open ? UNLOCK : LOCK, role: manage ? "button" : "img",
                             "aria-label": tip, ...(manage ? { tabindex: "0" } : {}) });
-  lock.append(el("span", { class: "rec-lock-tip", text: manage ? `${tip}. Нажмите — ссылка или показать всем` : tip }));
+  lock.append(el("span", { class: "rec-lock-tip",
+                           text: manage && !open ? `${tip}. Нажмите — ссылка или показать всем` : tip }));
   if (!manage) return lock;
 
   const msg = el("span", { class: "rec-lock-msg" });
@@ -752,7 +759,17 @@ function lockOf(record) {
     return b;
   };
   let armed = 0;
-  const menu = el("div", { class: "rec-lock-menu", hidden: "" },
+  const menu = open
+    ? el("div", { class: "rec-lock-menu", hidden: "" },
+        item("Сделать личной", async (b) => {
+          // Вторым щелчком: запись уйдёт из общего списка и из поиска (ближайшим прогоном).
+          if (Date.now() - armed > 4000) { armed = Date.now(); b.textContent = "Точно скрыть от всех?"; return; }
+          b.disabled = true;
+          await setAccess(record.id, "private");
+          location.reload();
+        }),
+        msg)
+    : el("div", { class: "rec-lock-menu", hidden: "" },
     item("Скопировать ссылку", async () => {
       const st = await getAccess(record.id);
       const slug = location.pathname.split("/").filter(Boolean)[0] || "";
@@ -865,8 +882,8 @@ function card(record) {
   );
   // Личная запись — замок в правом верхнем углу, в цвет рамки (владелец, 17.10: «более явно»):
   // её видят автор и те, кому он дал ссылку, в поиске её нет.
-  if (record.private) {
-    node.classList.add("private");
+  if (record.private || (record.mine && record.owner)) {
+    node.classList.add(record.private ? "private" : "mine-open");
     // Подсказка — своя, а не `title`: браузерная всплывает с задержкой в секунду (владелец, 17.10:
     // «показывать сразу на hover»).
     node.append(lockOf(record));
