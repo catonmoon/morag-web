@@ -317,6 +317,18 @@ body[data-view="signin"] #user-wrap{display:none}
 .rec-award{margin-right:6px}
 /* Замок личной записи — в правом верхнем углу карточки, цветом её рамки (и вместе с ней ярчает). */
 .rec-card.private,.rec-card.mine-open{position:relative}
+/* В шапке читалки — тот же замок в правом верхнем углу; заголовок не заезжает под него. */
+.rd-head{position:relative}
+.rd-head > .rec-lock{top:2px;right:0;width:22px;height:22px}
+.rd-head:has(> .rec-lock) h2{padding-right:34px}
+.rd-head > .rec-lock.unlocked{opacity:.45}
+.rd-head > .rec-lock.unlocked:hover,.rd-head > .rec-lock.unlocked.open{opacity:1}
+.rec-lock-who{display:flex;flex-wrap:wrap;gap:4px 10px;padding:4px 10px 2px;font-size:12px;color:var(--ink-dim)}
+.rec-lock-who:empty{display:none}
+.rec-lock-who-head{width:100%}
+.rec-lock-person{display:inline-flex;align-items:center;gap:3px;color:var(--ink)}
+.rec-lock-x{font:inherit;font-size:11px;border:none;background:transparent;color:var(--ink-dim);cursor:pointer;padding:0 3px}
+.rec-lock-x:hover{color:var(--accent)}
 /* Своя общая запись: открытый замок — только при наведении на карточку и бледно: это действие, а
    не признак (признак — у личной). */
 .rec-lock.unlocked{opacity:0;transition:opacity .15s,color .2s}
@@ -326,6 +338,8 @@ body[data-view="signin"] #user-wrap{display:none}
 .rec-lock{position:absolute;top:12px;right:14px;width:18px;height:18px;display:block;
   color:color-mix(in srgb,var(--accent) 42%,var(--line));transition:color .2s}
 .rec-lock svg{width:100%;height:100%;display:block}
+.rec-lock:focus{outline:none}
+.rec-lock:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:5px}
 /* Подсказка замка — сразу при наведении, без задержки браузерного title. */
 .rec-lock-tip{position:absolute;top:calc(100% + 6px);right:-4px;width:max-content;max-width:260px;z-index:5;
   padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);
@@ -1311,15 +1325,6 @@ body[data-view="chat"] .chat-tools{display:flex}
 .rec-summary.open .rec-more{position:static;display:inline;padding:0;margin-left:6px;background:none}
 /* Аннотация в читалке — целиком: сюда пришли читать, а не выбирать. */
 .rd-summary{color:var(--ink-dim);font-size:14px;line-height:1.55;margin:6px 0 0;max-width:70ch}
-/* Строка доступа личной записи — хозяину и админу: состояние, ссылка, «показать всем», кто открыл. */
-.rd-access{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:10px 0 0;font-size:13px;color:var(--ink-dim)}
-.rd-access-btn{font:inherit;font-size:12px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer}
-.rd-access-btn:hover{border-color:var(--accent)}
-.rd-access-btn:disabled{opacity:.5;cursor:default}
-.rd-access-who{display:inline-flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
-.rd-access-person{display:inline-flex;align-items:center;gap:2px}
-.rd-access-person .rd-access-btn{padding:0 5px;border:none}
-.rd-access-msg{color:var(--accent)}
 
 /* Поля записи — в режиме правки, под шапкой. Правят то, из чего шапка собирается,
    поэтому форма живёт рядом с тем, что показывает, а не в отдельном углу. */

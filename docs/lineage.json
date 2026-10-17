@@ -723,6 +723,9 @@
       "sha256": "8ed4e6d0865274960c49a2db12b9ce9b2eeaa82315ea4cb76544ca89e036bd7b",
       "from": "web/js/episodes/list.js"
     },
+    "web/js/records/lock.js": {
+      "status": "ours"
+    },
     "web/js/records/marks.js": {
       "status": "ours"
     },
