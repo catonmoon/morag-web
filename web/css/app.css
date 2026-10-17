@@ -318,9 +318,14 @@ body[data-view="signin"] #user-wrap{display:none}
 /* Замок личной записи — в правом верхнем углу карточки, цветом её рамки (и вместе с ней ярчает). */
 .rec-card.private{position:relative}
 .rec-card.private .rec-title{padding-right:26px}
-.rec-lock{position:absolute;top:12px;right:14px;width:18px;height:18px;display:block;cursor:help;
+.rec-lock{position:absolute;top:12px;right:14px;width:18px;height:18px;display:block;
   color:color-mix(in srgb,var(--accent) 42%,var(--line));transition:color .2s}
 .rec-lock svg{width:100%;height:100%;display:block}
+/* Подсказка замка — сразу при наведении, без задержки браузерного title. */
+.rec-lock-tip{position:absolute;top:calc(100% + 6px);right:-4px;width:max-content;max-width:260px;z-index:5;
+  padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);
+  font-size:12px;line-height:1.4;box-shadow:var(--shadow);opacity:0;visibility:hidden;pointer-events:none}
+.rec-lock:hover .rec-lock-tip{opacity:1;visibility:visible}
 .rec-card.sec .rec-lock{color:color-mix(in srgb,var(--accent) 38%,var(--line))}
 .rec-card:hover .rec-lock{color:color-mix(in srgb,var(--accent) 42%,var(--line))}
 .rec-card.sec:hover .rec-lock{color:color-mix(in srgb,var(--accent) 85%,var(--line))}

@@ -806,8 +806,12 @@ function card(record) {
   // её видят автор и те, кому он дал ссылку, в поиске её нет.
   if (record.private) {
     node.classList.add("private");
-    node.append(el("span", { class: "rec-lock", html: LOCK, title: "Скрытая запись — видна только вам и тем, кому вы дали ссылку. В общем списке и поиске её нет",
-                             "aria-label": "Личная запись" }));
+    // Подсказка — своя, а не `title`: браузерная всплывает с задержкой в секунду (владелец, 17.10:
+    // «показывать сразу на hover»).
+    const tip = "Скрытая запись — видна только вам и тем, кому вы дали ссылку. В общем списке и поиске её нет";
+    const lock = el("span", { class: "rec-lock", html: LOCK, role: "img", "aria-label": tip });
+    lock.append(el("span", { class: "rec-lock-tip", text: tip }));
+    node.append(lock);
   }
   // Цвет ветки — рамкой карточки и всем, что внутри неё нарисовано акцентом (длительность).
   paintSection(node, record.section);
